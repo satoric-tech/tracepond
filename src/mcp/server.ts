@@ -47,8 +47,6 @@ export async function runMemoryMcpServer(config: Partial<MemoryConfig> = {}): Pr
 
   registerQueryTool("query");
   registerDescribeTool("describe");
-  registerQueryTool("tracepond.query");
-  registerDescribeTool("tracepond.describe");
 
   await server.connect(new StdioServerTransport());
 }

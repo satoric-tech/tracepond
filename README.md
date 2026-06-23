@@ -122,8 +122,6 @@ tracepond mcp
 | `query` | Run read-only DuckDB SQL |
 | `describe` | Show config, schemas, and examples |
 
-Compatibility aliases are registered as `tracepond.query` and `tracepond.describe`.
-
 ---
 
 ## Examples
