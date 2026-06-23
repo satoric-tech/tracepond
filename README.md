@@ -147,4 +147,6 @@ npm run build
 npm run smoke
 ```
 
+## License
+
 License: MIT.
