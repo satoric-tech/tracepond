@@ -1,8 +1,8 @@
-import { formatQueryResult, MemoryDuckDb, type MemoryConfig, type QueryResult } from "./memory/duckdb.js";
+import { formatQueryResult, MemoryDuckDb, type MemoryConfig, type MemoryOptions, type QueryResult } from "./memory/duckdb.js";
 
-export type TracepondOptions = Partial<MemoryConfig>;
+export type TracepondOptions = MemoryOptions;
 
-export { formatQueryResult, type MemoryConfig, type QueryResult };
+export { formatQueryResult, type MemoryConfig, type MemoryOptions, type QueryResult };
 
 export async function query(sql: string, options: TracepondOptions = {}): Promise<QueryResult> {
   const db = await MemoryDuckDb.open(options);

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { runMemoryMcpServer } from "./mcp/server.js";
-import { parseDurationMs } from "./memory/duckdb.js";
-import { describe, formatQueryResult, query, refresh, type MemoryConfig } from "./sdk.js";
+import { parseDurationMs, type MemoryOptions } from "./memory/duckdb.js";
+import { describe, formatQueryResult, query, refresh } from "./sdk.js";
 
 type CliOptions = {
   codexHome?: string;
   claudeHome?: string;
   cursorHome?: string;
-  opencodeDataDir?: string[];
-  databasePath?: string;
+  opencodeHome?: string;
+  tracepondHome?: string;
   cwd?: string;
   refreshInterval?: string;
 };
@@ -22,8 +22,8 @@ const program = new Command()
   .option("--codex-home <path>", "Override Codex home, default ~/.codex")
   .option("--claude-home <path>", "Override Claude home, default ~/.claude")
   .option("--cursor-home <path>", "Override Cursor home, default ~/.cursor")
-  .option("--opencode-data-dir <path>", "Add an OpenCode data dir; can be repeated, default ~/.local/share/opencode", collect, [])
-  .option("--database-path <path>", "Override persistent DuckDB cache path, default ~/.tracepond/tracepond.duckdb")
+  .option("--opencode-home <path>", "Override OpenCode home, default ~/.local/share/opencode")
+  .option("--tracepond-home <path>", "Override Tracepond home, default ~/.tracepond")
   .option("--cwd <path>", "Override current working directory")
   .option("--refresh-interval <duration>", "Minimum gold/FTS refresh interval, e.g. 0, 30s, 5m, 1h; default 5m");
 
@@ -52,24 +52,19 @@ program
 
 program
   .command("refresh")
-  .description("Force the global bronze-to-silver-to-gold refresh path")
+  .description("Force Tracepond to refresh gold tables and FTS indexes")
   .action(async () => {
     await refresh(configFromOptions(program.opts<CliOptions>()));
   });
 
-function collect(value: string, previous: string[]): string[] {
-  previous.push(value);
-  return previous;
-}
-
-function configFromOptions(options: CliOptions): Partial<MemoryConfig> {
+function configFromOptions(options: CliOptions): MemoryOptions {
   return {
     cwd: options.cwd,
     codexHome: options.codexHome,
     claudeHome: options.claudeHome,
     cursorHome: options.cursorHome,
-    opencodeDataDirs: options.opencodeDataDir?.length ? options.opencodeDataDir : undefined,
-    databasePath: options.databasePath,
+    opencodeHome: options.opencodeHome,
+    tracepondHome: options.tracepondHome,
     refreshIntervalMs: parseDurationMs(options.refreshInterval),
   };
 }

@@ -1,9 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { describe, formatQueryResult, query as runQuery, type MemoryConfig } from "../sdk.js";
+import { describe, formatQueryResult, query as runQuery, type MemoryOptions } from "../sdk.js";
 
-export async function runMemoryMcpServer(config: Partial<MemoryConfig> = {}): Promise<void> {
+export async function runMemoryMcpServer(config: MemoryOptions = {}): Promise<void> {
   const server = new McpServer({
     name: "tracepond",
     version: "0.1.0",

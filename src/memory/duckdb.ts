@@ -19,11 +19,14 @@ export type MemoryConfig = {
   codexHome: string;
   claudeHome: string;
   cursorHome: string;
-  opencodeDataDirs: string[];
+  opencodeHome: string;
+  tracepondHome: string;
   databasePath: string;
   client: string;
   refreshIntervalMs: number;
 };
+
+export type MemoryOptions = Partial<Omit<MemoryConfig, "databasePath">>;
 
 type TraceSource = "codex" | "claude" | "cursor" | "opencode";
 
@@ -31,7 +34,7 @@ export class MemoryDuckDb {
   private instance: DuckDBInstance | null = null;
   private connection: DuckDBConnection | null = null;
 
-  static async open(config: Partial<MemoryConfig> = {}): Promise<MemoryDuckDb> {
+  static async open(config: MemoryOptions = {}): Promise<MemoryDuckDb> {
     const db = new MemoryDuckDb(resolveMemoryConfig(config));
     await db.initialize();
     return db;
@@ -75,12 +78,12 @@ export class MemoryDuckDb {
       "Resolved config:",
       `- client: ${this.config.client}`,
       `- cwd: ${this.config.cwd}`,
-      `- database_path: ${this.config.databasePath}`,
       `- refresh_interval_ms: ${this.config.refreshIntervalMs}`,
       `- codex_home: ${this.config.codexHome}`,
       `- claude_home: ${this.config.claudeHome}`,
       `- cursor_home: ${this.config.cursorHome}`,
-      `- opencode_data_dirs: ${this.config.opencodeDataDirs.join(", ") || "(none)"}`,
+      `- opencode_home: ${this.config.opencodeHome}`,
+      `- tracepond_home: ${this.config.tracepondHome}`,
       "",
       "Storage policy:",
       "- bronze: views over raw source files/stores",
@@ -95,7 +98,7 @@ export class MemoryDuckDb {
       "- claude_events: extracted Claude event fields plus raw JSON",
       "- cursor_raw: raw Cursor SQLite rows read from <cursor_home>/chats/*/*/store.db",
       "- cursor_events: extracted Cursor message/tool fields from decoded blob JSON",
-      "- opencode_raw: raw OpenCode JSON rows read from <opencode_data_dir>/storage/session/**/*.json and <opencode_data_dir>/storage/message/**/*.json",
+      "- opencode_raw: raw OpenCode JSON rows read from <opencode_home>/storage/session/**/*.json and <opencode_home>/storage/message/**/*.json",
       "- opencode_events: extracted OpenCode event/session fields plus raw JSON",
       "- messages: materialized cross-source normalized message stream with FTS on text",
       "- conversations: materialized cross-source conversation/session rollups with FTS on first_user_text and last_text",
@@ -781,7 +784,7 @@ export function formatQueryResult(result: QueryResult): string {
   );
 }
 
-export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryConfig {
+export function resolveMemoryConfig(config: MemoryOptions = {}): MemoryConfig {
   const cwd =
     config.cwd ??
     process.env.TRACEPOND_CWD ??
@@ -801,15 +804,15 @@ export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryC
     process.env.TRACEPOND_CURSOR_HOME ??
     process.env.CURSOR_HOME ??
     path.join(home(), ".cursor");
-  const opencodeDataDirs =
-    config.opencodeDataDirs ??
-    splitCommaList(process.env.TRACEPOND_OPENCODE_DATA_DIRS) ??
-    splitCommaList(process.env.OPENCODE_DATA_DIR) ??
-    [path.join(home(), ".local", "share", "opencode")];
-  const databasePath =
-    config.databasePath ??
-    process.env.TRACEPOND_DATABASE_PATH ??
-    path.join(home(), ".tracepond", "tracepond.duckdb");
+  const opencodeHome =
+    config.opencodeHome ??
+    process.env.TRACEPOND_OPENCODE_HOME ??
+    process.env.OPENCODE_HOME ??
+    path.join(home(), ".local", "share", "opencode");
+  const tracepondHome =
+    config.tracepondHome ??
+    process.env.TRACEPOND_HOME ??
+    path.join(home(), ".tracepond");
   const refreshIntervalMs =
     config.refreshIntervalMs ??
     parseDurationMs(process.env.TRACEPOND_REFRESH_INTERVAL) ??
@@ -820,8 +823,9 @@ export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryC
     codexHome: path.resolve(codexHome),
     claudeHome: path.resolve(claudeHome),
     cursorHome: path.resolve(cursorHome),
-    opencodeDataDirs: opencodeDataDirs.map((dir) => path.resolve(dir)),
-    databasePath: path.resolve(databasePath),
+    opencodeHome: path.resolve(opencodeHome),
+    tracepondHome: path.resolve(tracepondHome),
+    databasePath: path.join(path.resolve(tracepondHome), "tracepond.duckdb"),
     client: config.client ?? process.env.TRACEPOND_CLIENT ?? "unknown",
     refreshIntervalMs,
   };
@@ -871,16 +875,14 @@ async function discoverOpenCodeFiles(config: MemoryConfig): Promise<Array<{
   path: string;
 }>> {
   const files = [];
-  for (const dir of config.opencodeDataDirs) {
-    files.push(
-      ...(await walkFiles(path.join(dir, "storage", "session"), 100_000))
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => ({ source: "opencode" as const, path: file })),
-      ...(await walkFiles(path.join(dir, "storage", "message"), 100_000))
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => ({ source: "opencode" as const, path: file })),
-    );
-  }
+  files.push(
+    ...(await walkFiles(path.join(config.opencodeHome, "storage", "session"), 100_000))
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => ({ source: "opencode" as const, path: file })),
+    ...(await walkFiles(path.join(config.opencodeHome, "storage", "message"), 100_000))
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => ({ source: "opencode" as const, path: file })),
+  );
   return files;
 }
 
@@ -995,15 +997,4 @@ function emptySelect(columns: Record<string, string>): string {
 
 function home(): string {
   return os.homedir();
-}
-
-function splitCommaList(value: string | undefined): string[] | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const parts = value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts.length > 0 ? parts : undefined;
 }
