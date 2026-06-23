@@ -2,7 +2,16 @@
 
 [![License](https://img.shields.io/badge/license-MIT-007ec6?style=flat-square)](LICENSE)
 
-DuckDB SQL over local coding-agent traces and memories. Persistent cache, read-only queries, no hosted service.
+DuckDB over local coding-agent traces. Use it as a CLI, TypeScript SDK, or MCP server.
+
+Tracepond gives you stable query surfaces:
+
+| Layer | Tables / views |
+|---|---|
+| Bronze | `codex_raw`, `claude_raw`, `cursor_raw`, `opencode_raw` |
+| Silver | `codex_events`, `claude_events`, `cursor_events`, `opencode_events` |
+| Gold | `messages`, `conversations`, `tool_calls`, `search_documents` |
+| Control | `source_files`, `memory_documents` |
 
 ---
 
@@ -22,72 +31,204 @@ npm link
 
 ---
 
-## Usage
-
-**Describe available tables and views**
+## CLI
 
 ```sh
 tracepond describe
 ```
 
-**Query recent Codex messages**
-
 ```sh
 tracepond query "
-  SELECT ts, role, substr(text, 1, 160) AS text
-  FROM codex_events
-  WHERE text IS NOT NULL
+  SELECT source, ts, role, substr(text, 1, 160) AS text
+  FROM messages
+  WHERE text ILIKE '%deploy%'
   ORDER BY ts DESC
   LIMIT 10
 "
 ```
 
-**Search Cursor chats**
+```sh
+tracepond refresh
+```
+
+BM25 search in `search` mode:
 
 ```sh
-tracepond query "
-  SELECT session_id, role, substr(text, 1, 160) AS text
-  FROM cursor_events
-  WHERE text ILIKE '%deploy%'
+tracepond --storage-mode search query "
+  SELECT source, kind, substr(text, 1, 160) AS text,
+         fts_main_search_documents.match_bm25(document_key, 'deploy') AS score
+  FROM search_documents
+  WHERE score IS NOT NULL
+  ORDER BY score DESC
   LIMIT 10
 "
 ```
 
-**Inspect cached files**
+Config example:
 
 ```sh
-tracepond query "
-  SELECT source, count(*) AS files, max(ingested_at) AS refreshed_at
-  FROM source_files
-  GROUP BY 1
-  ORDER BY 1
-"
+tracepond \
+  --storage-mode cache \
+  --bronze-mode table \
+  --silver-mode view \
+  --gold-mode view \
+  --search off \
+  --refresh-interval 5m \
+  describe
+```
+
+---
+
+## SDK
+
+```ts
+import { describe, query, refresh } from "@satoric-tech/tracepond";
+
+console.log(await describe());
+
+const result = await query(`
+  SELECT source, session_id, message_count, first_user_text
+  FROM conversations
+  ORDER BY ended_at DESC NULLS LAST
+  LIMIT 10
+`);
+
+await refresh();
+```
+
+With options:
+
+```ts
+await query("SELECT count(*) FROM messages", {
+  storageMode: "cache",
+  bronzeMode: "table",
+  silverMode: "view",
+  goldMode: "view",
+  searchMode: "off",
+  refreshIntervalMs: 300_000,
+});
 ```
 
 ---
 
 ## MCP
 
-Run the MCP server over stdio:
-
 ```sh
 tracepond mcp
 ```
 
-Tools:
-
 | Tool | Description |
 |---|---|
-| `query` | Run read-only DuckDB SQL over local traces and memories |
-| `describe` | Show resolved paths, available views, schemas, and examples |
+| `query` | Run read-only DuckDB SQL |
+| `describe` | Show config, schemas, and examples |
 
-Compatibility aliases are also registered as `tracepond.query` and `tracepond.describe`.
+Compatibility aliases are registered as `tracepond.query` and `tracepond.describe`.
+
+---
+
+## Examples
+
+<details open>
+<summary>Codex</summary>
+
+Recent messages:
+
+```sql
+SELECT ts, role, substr(text, 1, 160) AS text
+FROM codex_events
+WHERE text IS NOT NULL
+ORDER BY ts DESC
+LIMIT 10;
+```
+
+Tool usage:
+
+```sql
+SELECT tool_name, count(*) AS n
+FROM codex_events
+WHERE tool_name IS NOT NULL
+GROUP BY 1
+ORDER BY n DESC;
+```
+
+</details>
+
+<details>
+<summary>Claude Code</summary>
+
+Recent messages:
+
+```sql
+SELECT ts, role, substr(text, 1, 160) AS text
+FROM claude_events
+WHERE text IS NOT NULL
+ORDER BY ts DESC
+LIMIT 10;
+```
+
+Tool usage:
+
+```sql
+SELECT tool_name, count(*) AS n
+FROM claude_events
+WHERE tool_name IS NOT NULL
+GROUP BY 1
+ORDER BY n DESC;
+```
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+Search chats:
+
+```sql
+SELECT session_id, role, substr(text, 1, 160) AS text
+FROM cursor_events
+WHERE text ILIKE '%deploy%'
+LIMIT 10;
+```
+
+Tool activity:
+
+```sql
+SELECT tool_name, count(*) AS n
+FROM cursor_events
+WHERE tool_name IS NOT NULL
+GROUP BY 1
+ORDER BY n DESC;
+```
+
+</details>
+
+<details>
+<summary>OpenCode</summary>
+
+Recent messages:
+
+```sql
+SELECT ts, role, model, substr(text, 1, 160) AS text
+FROM opencode_events
+WHERE kind = 'message'
+ORDER BY ts DESC
+LIMIT 10;
+```
+
+Sessions:
+
+```sql
+SELECT session_id, provider, model
+FROM opencode_events
+WHERE kind = 'session'
+LIMIT 10;
+```
+
+</details>
 
 ---
 
 ## Sources
-
-Tracepond discovers local files from standard agent locations:
 
 | Source | Paths |
 |---|---|
@@ -97,141 +238,53 @@ Tracepond discovers local files from standard agent locations:
 | OpenCode | `~/.local/share/opencode/storage/session/**/*.json`, `~/.local/share/opencode/storage/message/**/*.json` |
 | Workspace | `AGENTS.md`, `CLAUDE.md` |
 
-Trace rows are cached in `~/.tracepond/tracepond.duckdb` by default. Source files are tracked by path, size, and mtime. Only changed files are refreshed before the database is reopened read-only with external access disabled.
-
 ---
 
-## Data Layers
+## Storage
 
-### Bronze
+Tracepond uses a stable logical model and configurable physical storage.
 
-Bronze tables cache source records with minimal transformation.
+| Mode | Bronze | Silver | Gold | Search |
+|---|---|---|---|---|
+| `live` | view | view | view | off |
+| `cache` | table | view | view | off |
+| `search` | table | view | view | table |
+| `fast` | table | table | table | table |
 
-| Table | Grain |
-|---|---|
-| `codex_raw` | One JSONL row from Codex session logs |
-| `claude_raw` | One JSONL row from Claude Code logs |
-| `cursor_raw` | One Cursor SQLite `meta` or `blobs` row |
-| `opencode_raw` | One OpenCode session or message JSON record |
+Current support: `cache` and `search`.
 
-### Silver
+The other modes are reserved by the config contract and fail clearly until their physical refresh paths are implemented.
 
-Silver views normalize each source into queryable event columns.
+`search` mode materializes `search_documents` and creates a DuckDB FTS index. The query connection remains read-only, but extension loading requires DuckDB external access.
 
-| View | Common columns |
-|---|---|
-| `codex_events` | `source`, `filename`, `line_number`, `ts`, `event_type`, `payload_type`, `turn_id`, `role`, `tool_name`, `call_id`, `text`, `raw` |
-| `claude_events` | `source`, `filename`, `line_number`, `ts`, `event_type`, `subtype`, `session_id`, `role`, `content_type`, `tool_name`, `text`, `raw` |
-| `cursor_events` | `source`, `filename`, `row_number`, `workspace_id`, `session_id`, `blob_id`, `ts`, `role`, `message_id`, `content_type`, `tool_name`, `tool_call_id`, `text`, `raw` |
-| `opencode_events` | `source`, `filename`, `kind`, `session_id`, `line_number`, `ts`, `role`, `provider`, `model`, `text`, `raw` |
+Global table refresh runs as:
 
-### Control
+```text
+bronze -> silver -> gold -> search
+```
 
-| Table | Description |
-|---|---|
-| `source_files` | Cache manifest with `source`, `path`, `size_bytes`, `mtime_ms`, and `ingested_at` |
-| `memory_documents` | Markdown and text memories or workspace instructions |
-
----
-
-## Gold Schemas
-
-Gold should model cross-source product concepts. Keep these as views first, then materialize only if query time or ranking cost requires it.
-
-### `messages`
-
-One row per user, assistant, system, or tool message across all sources.
-
-| Column | Type | Notes |
-|---|---|---|
-| `message_key` | `VARCHAR` | Stable hash of source, filename, and source row id |
-| `source` | `VARCHAR` | `codex`, `claude`, `cursor`, or `opencode` |
-| `session_id` | `VARCHAR` | Native session, turn, or conversation id when available |
-| `ts` | `TIMESTAMP` | Event timestamp when available |
-| `role` | `VARCHAR` | `system`, `user`, `assistant`, `tool`, or source-specific role |
-| `text` | `VARCHAR` | Searchable text |
-| `tool_name` | `VARCHAR` | Tool name when the message represents tool usage |
-| `model` | `VARCHAR` | Model id when available |
-| `filename` | `VARCHAR` | Source file path |
-| `raw` | `JSON` | Source payload |
-
-### `conversations`
-
-One row per session-like conversation.
-
-| Column | Type | Notes |
-|---|---|---|
-| `conversation_key` | `VARCHAR` | Stable hash of source and session id |
-| `source` | `VARCHAR` | Trace source |
-| `session_id` | `VARCHAR` | Native session id |
-| `started_at` | `TIMESTAMP` | First message timestamp |
-| `ended_at` | `TIMESTAMP` | Last message timestamp |
-| `message_count` | `BIGINT` | Messages in the conversation |
-| `tool_call_count` | `BIGINT` | Tool messages or calls |
-| `first_user_text` | `VARCHAR` | Short title candidate |
-| `last_text` | `VARCHAR` | Last non-empty message text |
-
-### `tool_calls`
-
-One row per normalized tool call or tool result.
-
-| Column | Type | Notes |
-|---|---|---|
-| `tool_call_key` | `VARCHAR` | Stable hash of source row identity |
-| `source` | `VARCHAR` | Trace source |
-| `session_id` | `VARCHAR` | Conversation id |
-| `ts` | `TIMESTAMP` | Call or result timestamp |
-| `role` | `VARCHAR` | Usually `tool` or source equivalent |
-| `tool_name` | `VARCHAR` | Tool name |
-| `tool_call_id` | `VARCHAR` | Native call id when available |
-| `input_text` | `VARCHAR` | Arguments or command text when available |
-| `output_text` | `VARCHAR` | Result text when available |
-| `raw` | `JSON` | Source payload |
-
-### `search_documents`
-
-One row per searchable chunk. This is the best first gold table for BM25.
-
-| Column | Type | Notes |
-|---|---|---|
-| `document_key` | `VARCHAR` | Stable hash of source row plus chunk index |
-| `source` | `VARCHAR` | Trace or memory source |
-| `kind` | `VARCHAR` | `message`, `tool_call`, `memory`, `instruction`, or `conversation` |
-| `session_id` | `VARCHAR` | Conversation id when available |
-| `ts` | `TIMESTAMP` | Timestamp when available |
-| `title` | `VARCHAR` | File title, first prompt, or conversation label |
-| `text` | `VARCHAR` | Chunk text for search |
-| `metadata` | `JSON` | Compact source metadata |
-
-Use DuckDB full text search or a BM25 extension over `search_documents` before adding vector embeddings. Embeddings are useful later for semantic recall, but they add model choice, storage, refresh, and privacy decisions.
+Views are recreated every startup. Tables are refreshed when the global refresh runs. `--refresh-interval` / `TRACEPOND_REFRESH_INTERVAL` skips table refreshes while the cache is fresh.
 
 ---
 
 ## Options
 
-### CLI flags
-
-| Flag | Description | Default |
+| CLI flag | Env var | Default |
 |---|---|---|
-| `--codex-home PATH` | Codex home directory | `~/.codex` |
-| `--claude-home PATH` | Claude home directory | `~/.claude` |
-| `--cursor-home PATH` | Cursor home directory | `~/.cursor` |
-| `--opencode-data-dir PATH` | OpenCode data directory, repeatable | `~/.local/share/opencode` |
-| `--database-path PATH` | Persistent DuckDB cache path | `~/.tracepond/tracepond.duckdb` |
-| `--workspace-root PATH` | Workspace root, repeatable | current directory |
-| `--cwd PATH` | Current working directory override | current directory |
+| `--codex-home` | `TRACEPOND_CODEX_HOME` | `~/.codex` |
+| `--claude-home` | `TRACEPOND_CLAUDE_HOME` | `~/.claude` |
+| `--cursor-home` | `TRACEPOND_CURSOR_HOME` | `~/.cursor` |
+| `--opencode-data-dir` | `TRACEPOND_OPENCODE_DATA_DIRS` | `~/.local/share/opencode` |
+| `--database-path` | `TRACEPOND_DATABASE_PATH` | `~/.tracepond/tracepond.duckdb` |
+| `--workspace-root` | `TRACEPOND_WORKSPACE_ROOTS` | current directory |
+| `--storage-mode` | `TRACEPOND_STORAGE_MODE` | `cache` |
+| `--bronze-mode` | `TRACEPOND_BRONZE_MODE` | profile default |
+| `--silver-mode` | `TRACEPOND_SILVER_MODE` | profile default |
+| `--gold-mode` | `TRACEPOND_GOLD_MODE` | profile default |
+| `--search` | `TRACEPOND_SEARCH` | profile default |
+| `--refresh-interval` | `TRACEPOND_REFRESH_INTERVAL` | `0` |
 
-### Environment variables
-
-| Variable | Description |
-|---|---|
-| `TRACEPOND_CODEX_HOME` | Codex home directory |
-| `TRACEPOND_CLAUDE_HOME` | Claude home directory |
-| `TRACEPOND_CURSOR_HOME` | Cursor home directory |
-| `TRACEPOND_OPENCODE_DATA_DIRS` | Comma-separated OpenCode data directories |
-| `TRACEPOND_DATABASE_PATH` | Persistent DuckDB cache path |
-| `TRACEPOND_WORKSPACE_ROOTS` | Path-list of workspace roots |
-| `TRACEPOND_CWD` | Current working directory override |
+Durations: `0`, `30s`, `5m`, `1h`, `1d`.
 
 ---
 

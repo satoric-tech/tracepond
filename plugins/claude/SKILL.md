@@ -32,3 +32,7 @@ Useful tables:
 - `cursor_raw`: raw Cursor `meta` and `blobs` rows from `~/.cursor/chats/*/*/store.db`.
 - `cursor_events`: normalized Cursor message/tool events decoded from text-like blob JSON.
 - `opencode_events`: normalized OpenCode session/message JSON from `~/.local/share/opencode/storage`.
+- `messages`: cross-source normalized message stream.
+- `conversations`: cross-source session rollups.
+- `tool_calls`: cross-source normalized tool calls and results.
+- `search_documents`: cross-source searchable text chunks for keyword/BM25-style search.
