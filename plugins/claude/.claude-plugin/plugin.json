@@ -1,0 +1,12 @@
+{
+  "name": "tracepond",
+  "version": "0.1.0",
+  "description": "Query local coding-agent memories, traces, instructions, and prior work.",
+  "author": {
+    "name": "satoric-tech"
+  },
+  "license": "MIT",
+  "keywords": ["memory", "traces", "mcp", "codex", "claude"],
+  "skills": "./SKILL.md",
+  "mcpServers": "./.mcp.json"
+}

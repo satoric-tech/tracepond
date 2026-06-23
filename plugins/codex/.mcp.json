@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tracepond": {
+      "command": "tracepond",
+      "args": ["mcp"],
+      "env": {
+        "TRACEPOND_CLIENT": "codex"
+      },
+      "note": "Local memory MCP server for querying Codex and Claude Code memories, traces, and instructions."
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "tracepond",
+  "version": "0.1.0+codex.20260623041533",
+  "description": "Query local coding-agent memories, traces, instructions, and prior work.",
+  "author": {
+    "name": "satoric-tech"
+  },
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "traces",
+    "mcp",
+    "codex",
+    "claude"
+  ],
+  "skills": "./SKILL.md",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Tracepond",
+    "shortDescription": "Query coding-agent memories and traces.",
+    "longDescription": "Tracepond provides an MCP server and skill for querying local Codex and Claude Code memories, traces, instructions, and prior work with cited snippets.",
+    "developerName": "satoric-tech",
+    "category": "Productivity",
+    "capabilities": [
+      "Search",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Search memory for prior work on this repo.",
+      "Find related tool failures in past traces.",
+      "What instructions apply here?"
+    ],
+    "brandColor": "#2563EB"
+  }
+}
