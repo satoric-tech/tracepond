@@ -142,4 +142,4 @@ npm run build
 
 ## License
 
-License: MIT.
+MIT
