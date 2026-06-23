@@ -14,18 +14,6 @@ export type QueryResult = {
 
 const defaultRefreshIntervalMs = 5 * 60 * 1000;
 
-export type StorageMode = "default";
-export type LayerMode = "view" | "table";
-export type SearchMode = "table";
-
-export type LayerConfig = {
-  storageMode: StorageMode;
-  bronzeMode: LayerMode;
-  silverMode: LayerMode;
-  goldMode: LayerMode;
-  searchMode: SearchMode;
-};
-
 export type MemoryConfig = {
   cwd: string;
   codexHome: string;
@@ -34,11 +22,6 @@ export type MemoryConfig = {
   opencodeDataDirs: string[];
   databasePath: string;
   client: string;
-  storageMode: StorageMode;
-  bronzeMode: LayerMode;
-  silverMode: LayerMode;
-  goldMode: LayerMode;
-  searchMode: SearchMode;
   refreshIntervalMs: number;
 };
 
@@ -93,16 +76,17 @@ export class MemoryDuckDb {
       `- client: ${this.config.client}`,
       `- cwd: ${this.config.cwd}`,
       `- database_path: ${this.config.databasePath}`,
-      `- storage_mode: ${this.config.storageMode}`,
-      `- bronze_mode: ${this.config.bronzeMode}`,
-      `- silver_mode: ${this.config.silverMode}`,
-      `- gold_mode: ${this.config.goldMode}`,
-      "- search: fts",
       `- refresh_interval_ms: ${this.config.refreshIntervalMs}`,
       `- codex_home: ${this.config.codexHome}`,
       `- claude_home: ${this.config.claudeHome}`,
       `- cursor_home: ${this.config.cursorHome}`,
       `- opencode_data_dirs: ${this.config.opencodeDataDirs.join(", ") || "(none)"}`,
+      "",
+      "Storage policy:",
+      "- bronze: views over raw source files/stores",
+      "- silver: views over bronze",
+      "- gold: materialized tables",
+      "- search: DuckDB FTS indexes on gold tables",
       "",
       "Core tables/views:",
       "- codex_raw: raw Codex JSONL rows read from <codex_home>/sessions/**/*.jsonl",
@@ -138,7 +122,6 @@ export class MemoryDuckDb {
   }
 
   private async initialize(): Promise<void> {
-    assertSupportedLayerConfig(this.config);
     await mkdir(path.dirname(this.config.databasePath), { recursive: true });
 
     this.instance = await DuckDBInstance.create(this.config.databasePath, writableDuckDbOptions());
@@ -800,7 +783,6 @@ export function formatQueryResult(result: QueryResult): string {
 }
 
 export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryConfig {
-  const layers = resolveLayerConfig();
   const cwd =
     config.cwd ??
     process.env.TRACEPOND_CWD ??
@@ -842,18 +824,7 @@ export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryC
     opencodeDataDirs: opencodeDataDirs.map((dir) => path.resolve(dir)),
     databasePath: path.resolve(databasePath),
     client: config.client ?? process.env.TRACEPOND_CLIENT ?? "unknown",
-    ...layers,
     refreshIntervalMs,
-  };
-}
-
-export function resolveLayerConfig(): LayerConfig {
-  return {
-    storageMode: "default",
-    bronzeMode: "view",
-    silverMode: "view",
-    goldMode: "table",
-    searchMode: "table",
   };
 }
 
@@ -982,21 +953,6 @@ function readOnlyDuckDbOptions(): Record<string, string> {
     autoinstall_known_extensions: "false",
     autoload_known_extensions: "false",
   };
-}
-
-function assertSupportedLayerConfig(config: MemoryConfig): void {
-  if (config.bronzeMode !== "view") {
-    throw new Error("Tracepond uses bronze views over raw source files");
-  }
-  if (config.silverMode !== "view") {
-    throw new Error("Tracepond uses silver views over bronze");
-  }
-  if (config.goldMode !== "table") {
-    throw new Error("Tracepond uses materialized gold tables");
-  }
-  if (config.searchMode !== "table") {
-    throw new Error("Tracepond always keeps FTS indexes on gold tables");
-  }
 }
 
 export function parseDurationMs(value: string | undefined): number | undefined {

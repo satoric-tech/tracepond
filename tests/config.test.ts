@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseDurationMs, resolveLayerConfig, resolveMemoryConfig } from "../src/memory/duckdb.ts";
+import { parseDurationMs, resolveMemoryConfig } from "../src/memory/duckdb.ts";
 
 test("parseDurationMs uses standard duration strings", () => {
   assert.equal(parseDurationMs(undefined), undefined);
@@ -11,24 +11,12 @@ test("parseDurationMs uses standard duration strings", () => {
   assert.throws(() => parseDurationMs("soon"), /Invalid refresh interval/);
 });
 
-test("layer policy is fixed and minimal", () => {
-  assert.deepEqual(resolveLayerConfig(), {
-    storageMode: "default",
-    bronzeMode: "view",
-    silverMode: "view",
-    goldMode: "table",
-    searchMode: "table",
-  });
-});
-
 test("resolveMemoryConfig reads env and normalizes paths", () => {
   const previousRefreshInterval = process.env.TRACEPOND_REFRESH_INTERVAL;
   process.env.TRACEPOND_REFRESH_INTERVAL = "2m";
 
   try {
     const config = resolveMemoryConfig({ cwd: "." });
-    assert.equal(config.storageMode, "default");
-    assert.equal(config.searchMode, "table");
     assert.equal(config.refreshIntervalMs, 120_000);
     assert.ok(config.cwd.startsWith("/"));
   } finally {

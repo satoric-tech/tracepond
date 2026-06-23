@@ -1,9 +1,6 @@
 import { formatQueryResult, MemoryDuckDb, type MemoryConfig, type QueryResult } from "./memory/duckdb.js";
 
-export type TracepondOptions = Partial<Omit<
-  MemoryConfig,
-  "storageMode" | "bronzeMode" | "silverMode" | "goldMode" | "searchMode"
->>;
+export type TracepondOptions = Partial<MemoryConfig>;
 
 export { formatQueryResult, type MemoryConfig, type QueryResult };
 
