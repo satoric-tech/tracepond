@@ -2,40 +2,19 @@
 
 [![License](https://img.shields.io/badge/license-MIT-007ec6?style=flat-square)](LICENSE)
 
-DuckDB over local coding-agent traces. Use it as a CLI, TypeScript SDK, or MCP server.
-
-Tracepond gives you stable query surfaces:
-
-| Layer | Tables / views |
-|---|---|
-| Bronze | `codex_raw`, `claude_raw`, `cursor_raw`, `opencode_raw` |
-| Silver | `codex_events`, `claude_events`, `cursor_events`, `opencode_events` |
-| Gold | `messages`, `conversations`, `tool_calls` |
-| Control | `source_files` |
-
----
-
-## Install
+DuckDB over local coding-agent traces, available as a CLI, TypeScript SDK, and MCP server.
 
 ```sh
 npm install -g @satoric-tech/tracepond
 ```
 
-For local development:
-
-```sh
-npm install
-npm run build
-npm link
-```
-
----
-
-## CLI
+Use `describe` to inspect the local Tracepond schema.
 
 ```sh
 tracepond describe
 ```
+
+Query normalized messages with read-only DuckDB SQL.
 
 ```sh
 tracepond query "
@@ -47,11 +26,7 @@ tracepond query "
 "
 ```
 
-```sh
-tracepond refresh
-```
-
-BM25 search:
+Search is always available through DuckDB FTS indexes on gold tables.
 
 ```sh
 tracepond query "
@@ -64,15 +39,13 @@ tracepond query "
 "
 ```
 
-Config example:
+Force a gold table and FTS refresh when you want fresh results immediately.
 
 ```sh
-tracepond --refresh-interval 5m describe
+tracepond refresh
 ```
 
----
-
-## SDK
+The TypeScript SDK exposes the same `describe`, `query`, and `refresh` surface.
 
 ```ts
 import { describe, query, refresh } from "@satoric-tech/tracepond";
@@ -89,7 +62,7 @@ const result = await query(`
 await refresh();
 ```
 
-With options:
+Pass source paths, database path, or refresh timing as options.
 
 ```ts
 await query("SELECT count(*) FROM messages", {
@@ -97,173 +70,83 @@ await query("SELECT count(*) FROM messages", {
 });
 ```
 
----
-
-## MCP
+Run the MCP server over stdio when connecting Tracepond to an agent.
 
 ```sh
 tracepond mcp
 ```
 
-| Tool | Description |
-|---|---|
-| `query` | Run read-only DuckDB SQL |
-| `describe` | Show config, schemas, and examples |
+The MCP server exposes only two tools.
 
----
-
-## Examples
-
-<details open>
-<summary>Codex</summary>
-
-Recent messages:
-
-```sql
-SELECT ts, role, substr(text, 1, 160) AS text
-FROM codex_events
-WHERE text IS NOT NULL
-ORDER BY ts DESC
-LIMIT 10;
+```text
+query     Run read-only DuckDB SQL
+describe  Show config, schemas, and examples
 ```
 
-Tool usage:
+Tracepond reads these local trace sources.
 
-```sql
-SELECT tool_name, count(*) AS n
-FROM codex_events
-WHERE tool_name IS NOT NULL
-GROUP BY 1
-ORDER BY n DESC;
+```text
+Codex        ~/.codex/sessions/**/*.jsonl
+Claude Code  ~/.claude/projects/**/*.jsonl
+Claude Code  ~/.claude/history.jsonl
+Cursor       ~/.cursor/chats/*/*/store.db
+OpenCode     ~/.local/share/opencode/storage/session/**/*.json
+OpenCode     ~/.local/share/opencode/storage/message/**/*.json
 ```
 
-</details>
+The storage policy is intentionally fixed.
 
-<details>
-<summary>Claude Code</summary>
-
-Recent messages:
-
-```sql
-SELECT ts, role, substr(text, 1, 160) AS text
-FROM claude_events
-WHERE text IS NOT NULL
-ORDER BY ts DESC
-LIMIT 10;
+```text
+bronze  views over raw source files/stores
+silver  views over bronze
+gold    materialized tables
+search  DuckDB FTS indexes on gold tables
 ```
 
-Tool usage:
+Gold tables are the stable query surface.
 
-```sql
-SELECT tool_name, count(*) AS n
-FROM claude_events
-WHERE tool_name IS NOT NULL
-GROUP BY 1
-ORDER BY n DESC;
+```text
+messages
+conversations
+tool_calls
 ```
 
-</details>
+FTS indexes are created directly on gold tables.
 
-<details>
-<summary>Cursor</summary>
-
-Search chats:
-
-```sql
-SELECT session_id, role, substr(text, 1, 160) AS text
-FROM cursor_events
-WHERE text ILIKE '%deploy%'
-LIMIT 10;
+```text
+messages       fts_main_messages.match_bm25(message_key, 'query')
+tool_calls     fts_main_tool_calls.match_bm25(tool_call_key, 'query')
+conversations  fts_main_conversations.match_bm25(conversation_key, 'query')
 ```
 
-Tool activity:
+Gold tables refresh every 5 minutes by default.
 
-```sql
-SELECT tool_name, count(*) AS n
-FROM cursor_events
-WHERE tool_name IS NOT NULL
-GROUP BY 1
-ORDER BY n DESC;
+```sh
+tracepond --refresh-interval 5m describe
 ```
 
-</details>
+Configuration stays limited to paths and refresh timing.
 
-<details>
-<summary>OpenCode</summary>
-
-Recent messages:
-
-```sql
-SELECT ts, role, model, substr(text, 1, 160) AS text
-FROM opencode_events
-WHERE kind = 'message'
-ORDER BY ts DESC
-LIMIT 10;
+```text
+--codex-home             TRACEPOND_CODEX_HOME          ~/.codex
+--claude-home            TRACEPOND_CLAUDE_HOME         ~/.claude
+--cursor-home            TRACEPOND_CURSOR_HOME         ~/.cursor
+--opencode-data-dir      TRACEPOND_OPENCODE_DATA_DIRS  ~/.local/share/opencode
+--database-path          TRACEPOND_DATABASE_PATH       ~/.tracepond/tracepond.duckdb
+--refresh-interval       TRACEPOND_REFRESH_INTERVAL    5m
 ```
 
-Sessions:
+Use standard duration strings for refresh intervals.
 
-```sql
-SELECT session_id, provider, model
-FROM opencode_events
-WHERE kind = 'session'
-LIMIT 10;
+```text
+0
+30s
+5m
+1h
+1d
 ```
 
-</details>
-
----
-
-## Sources
-
-| Source | Paths |
-|---|---|
-| Codex | `~/.codex/sessions/**/*.jsonl` |
-| Claude Code | `~/.claude/projects/**/*.jsonl`, `~/.claude/history.jsonl` |
-| Cursor | `~/.cursor/chats/*/*/store.db` |
-| OpenCode | `~/.local/share/opencode/storage/session/**/*.json`, `~/.local/share/opencode/storage/message/**/*.json` |
-
----
-
-## Storage
-
-Tracepond has one storage policy:
-
-| Layer | Physical form |
-|---|---|
-| Bronze | views over raw source files/stores |
-| Silver | views over bronze |
-| Gold | materialized tables |
-| Search | DuckDB FTS indexes on gold tables |
-
-Gold tables refresh every 5 minutes by default. `tracepond refresh` forces a refresh. `--refresh-interval` / `TRACEPOND_REFRESH_INTERVAL` changes the minimum refresh interval.
-
-FTS indexes are created directly on gold:
-
-| Gold table | FTS function | Indexed text |
-|---|---|---|
-| `messages` | `fts_main_messages.match_bm25(message_key, 'query')` | `text` |
-| `tool_calls` | `fts_main_tool_calls.match_bm25(tool_call_key, 'query')` | `input_text`, `output_text` |
-| `conversations` | `fts_main_conversations.match_bm25(conversation_key, 'query')` | `first_user_text`, `last_text` |
-
----
-
-## Options
-
-| CLI flag | Env var | Default |
-|---|---|---|
-| `--codex-home` | `TRACEPOND_CODEX_HOME` | `~/.codex` |
-| `--claude-home` | `TRACEPOND_CLAUDE_HOME` | `~/.claude` |
-| `--cursor-home` | `TRACEPOND_CURSOR_HOME` | `~/.cursor` |
-| `--opencode-data-dir` | `TRACEPOND_OPENCODE_DATA_DIRS` | `~/.local/share/opencode` |
-| `--database-path` | `TRACEPOND_DATABASE_PATH` | `~/.tracepond/tracepond.duckdb` |
-| `--refresh-interval` | `TRACEPOND_REFRESH_INTERVAL` | `5m` |
-
-Durations: `0`, `30s`, `5m`, `1h`, `1d`.
-
----
-
-## Development
+Develop locally with npm.
 
 ```sh
 npm install
@@ -272,8 +155,8 @@ npm run build
 npm run smoke
 ```
 
----
+License is MIT.
 
-## License
-
+```text
 MIT
+```

@@ -101,7 +101,7 @@ export class MemoryDuckDb {
       "- conversations: materialized cross-source conversation/session rollups with FTS on first_user_text and last_text",
       "- tool_calls: materialized cross-source normalized tool calls and results with FTS on input_text and output_text",
       "- source_files: manifest of discovered source files, mtimes, sizes, and ingest timestamps",
-      "- tracepond_metadata: refresh metadata and internal cache state",
+      "- tracepond_metadata: refresh metadata",
       "",
       "User queries run against a DuckDB database reopened with access_mode=READ_ONLY.",
       "",
@@ -189,7 +189,6 @@ export class MemoryDuckDb {
     await this.dropRelation("tool_calls");
     await connection.runAndReadAll(`CREATE TABLE tool_calls AS ${this.toolCallsSelectSql()}`);
 
-    await this.dropRelation("search_documents");
     await this.createGoldSearchIndexes();
   }
 
@@ -223,7 +222,7 @@ export class MemoryDuckDb {
       MemoryDuckDb.open(config)
         .then((db) => db.close())
         .catch(() => {
-          // Background refresh is best-effort; foreground queries keep using the last gold cache.
+          // Background refresh is best-effort; foreground queries keep using the current gold tables.
         });
     });
   }
