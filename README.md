@@ -98,13 +98,6 @@ Tracepond reads these local trace sources.
 - Cursor: `~/.cursor/chats/*/*/store.db`
 - OpenCode: `~/.local/share/opencode/storage/session/**/*.json`, `~/.local/share/opencode/storage/message/**/*.json`
 
-The storage policy is intentionally fixed.
-
-- Bronze: views over raw source files/stores.
-- Silver: views over bronze.
-- Gold: materialized tables.
-- Search: DuckDB FTS indexes on gold tables.
-
 Gold tables are the stable query surface.
 
 - `messages`
