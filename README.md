@@ -299,4 +299,4 @@ npm run smoke
 
 ## License
 
-MIT - built by [Satoric](https://satoric.com)
+MIT
