@@ -1,6 +1,6 @@
 ---
 name: query-tracepond
-description: Use when the user asks about prior work, memories, previous agent sessions, recurring repo conventions, historical tool failures, Cursor chats, OpenCode chats, or decisions that may be recorded in local Codex, Claude Code, Cursor, or OpenCode traces.
+description: Use when the user asks about prior work, previous agent sessions, recurring repo conventions, historical tool failures, Cursor chats, OpenCode chats, or decisions that may be recorded in local Codex, Claude Code, Cursor, or OpenCode traces.
 ---
 
 # Query Tracepond
@@ -9,12 +9,12 @@ Use the `query` MCP tool when the task depends on prior local coding-agent conte
 
 `query` accepts read-only DuckDB SQL, not natural language. Use `describe` first when you need the available view names, schemas, resolved client, or example queries.
 
-Tracepond caches Codex, Claude Code, Cursor, and OpenCode traces into a persistent DuckDB database. Bronze/cache tables include `codex_raw`, `claude_raw`, `cursor_raw`, and `opencode_raw`; silver normalized views include `codex_events`, `claude_events`, `cursor_events`, and `opencode_events`. Use `source_files` to inspect cached source paths, sizes, mtimes, and ingest timestamps.
+Tracepond exposes Codex, Claude Code, Cursor, and OpenCode traces through DuckDB. Bronze views include `codex_raw`, `claude_raw`, `cursor_raw`, and `opencode_raw`; silver normalized views include `codex_events`, `claude_events`, `cursor_events`, and `opencode_events`; gold tables include `messages`, `conversations`, and `tool_calls`. Use `source_files` to inspect discovered source paths, sizes, mtimes, and ingest timestamps.
 
 Good triggers:
 
 - The user asks what happened before, what was decided, or what a previous session found.
-- The user asks about Codex, Claude Code, Cursor, or OpenCode memories/traces/logs.
+- The user asks about Codex, Claude Code, Cursor, or OpenCode traces/logs.
 - The user asks for recurring repo conventions or instructions.
 - The user asks whether a similar tool failure, bug, or implementation was seen before.
 
@@ -35,4 +35,3 @@ Useful tables:
 - `messages`: cross-source normalized message stream.
 - `conversations`: cross-source session rollups.
 - `tool_calls`: cross-source normalized tool calls and results.
-- `search_documents`: cross-source searchable text chunks for keyword/BM25-style search.

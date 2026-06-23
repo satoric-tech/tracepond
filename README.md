@@ -10,8 +10,8 @@ Tracepond gives you stable query surfaces:
 |---|---|
 | Bronze | `codex_raw`, `claude_raw`, `cursor_raw`, `opencode_raw` |
 | Silver | `codex_events`, `claude_events`, `cursor_events`, `opencode_events` |
-| Gold | `messages`, `conversations`, `tool_calls`, `search_documents` |
-| Control | `source_files`, `memory_documents` |
+| Gold | `messages`, `conversations`, `tool_calls` |
+| Control | `source_files` |
 
 ---
 
@@ -51,13 +51,13 @@ tracepond query "
 tracepond refresh
 ```
 
-BM25 search in `search` mode:
+BM25 search:
 
 ```sh
-tracepond --storage-mode search query "
-  SELECT source, kind, substr(text, 1, 160) AS text,
-         fts_main_search_documents.match_bm25(document_key, 'deploy') AS score
-  FROM search_documents
+tracepond query "
+  SELECT source, ts, role, substr(text, 1, 160) AS text,
+         fts_main_messages.match_bm25(message_key, 'deploy') AS score
+  FROM messages
   WHERE score IS NOT NULL
   ORDER BY score DESC
   LIMIT 10
@@ -67,14 +67,7 @@ tracepond --storage-mode search query "
 Config example:
 
 ```sh
-tracepond \
-  --storage-mode cache \
-  --bronze-mode table \
-  --silver-mode view \
-  --gold-mode view \
-  --search off \
-  --refresh-interval 5m \
-  describe
+tracepond --refresh-interval 5m describe
 ```
 
 ---
@@ -100,11 +93,6 @@ With options:
 
 ```ts
 await query("SELECT count(*) FROM messages", {
-  storageMode: "cache",
-  bronzeMode: "table",
-  silverMode: "view",
-  goldMode: "view",
-  searchMode: "off",
   refreshIntervalMs: 300_000,
 });
 ```
@@ -230,38 +218,33 @@ LIMIT 10;
 
 | Source | Paths |
 |---|---|
-| Codex | `~/.codex/sessions/**/*.jsonl`, `~/.codex/memories/**`, `~/.codex/memories_extensions/**` |
-| Claude Code | `~/.claude/projects/**/*.jsonl`, `~/.claude/history.jsonl`, `~/.claude/projects/*/memory/**/*.md` |
+| Codex | `~/.codex/sessions/**/*.jsonl` |
+| Claude Code | `~/.claude/projects/**/*.jsonl`, `~/.claude/history.jsonl` |
 | Cursor | `~/.cursor/chats/*/*/store.db` |
 | OpenCode | `~/.local/share/opencode/storage/session/**/*.json`, `~/.local/share/opencode/storage/message/**/*.json` |
-| Workspace | `AGENTS.md`, `CLAUDE.md` |
 
 ---
 
 ## Storage
 
-Tracepond uses a stable logical model and configurable physical storage.
+Tracepond has one storage policy:
 
-| Mode | Bronze | Silver | Gold | Search |
-|---|---|---|---|---|
-| `live` | view | view | view | off |
-| `cache` | table | view | view | off |
-| `search` | table | view | view | table |
-| `fast` | table | table | table | table |
+| Layer | Physical form |
+|---|---|
+| Bronze | views over raw source files/stores |
+| Silver | views over bronze |
+| Gold | materialized tables |
+| Search | DuckDB FTS indexes on gold tables |
 
-Current support: `cache` and `search`.
+Gold tables refresh every 5 minutes by default. `tracepond refresh` forces a refresh. `--refresh-interval` / `TRACEPOND_REFRESH_INTERVAL` changes the minimum refresh interval.
 
-The other modes are reserved by the config contract and fail clearly until their physical refresh paths are implemented.
+FTS indexes are created directly on gold:
 
-`search` mode materializes `search_documents` and creates a DuckDB FTS index. The query connection remains read-only, but extension loading requires DuckDB external access.
-
-Global table refresh runs as:
-
-```text
-bronze -> silver -> gold -> search
-```
-
-Views are recreated every startup. Tables are refreshed when the global refresh runs. `--refresh-interval` / `TRACEPOND_REFRESH_INTERVAL` skips table refreshes while the cache is fresh.
+| Gold table | FTS function | Indexed text |
+|---|---|---|
+| `messages` | `fts_main_messages.match_bm25(message_key, 'query')` | `text` |
+| `tool_calls` | `fts_main_tool_calls.match_bm25(tool_call_key, 'query')` | `input_text`, `output_text` |
+| `conversations` | `fts_main_conversations.match_bm25(conversation_key, 'query')` | `first_user_text`, `last_text` |
 
 ---
 
@@ -274,13 +257,7 @@ Views are recreated every startup. Tables are refreshed when the global refresh 
 | `--cursor-home` | `TRACEPOND_CURSOR_HOME` | `~/.cursor` |
 | `--opencode-data-dir` | `TRACEPOND_OPENCODE_DATA_DIRS` | `~/.local/share/opencode` |
 | `--database-path` | `TRACEPOND_DATABASE_PATH` | `~/.tracepond/tracepond.duckdb` |
-| `--workspace-root` | `TRACEPOND_WORKSPACE_ROOTS` | current directory |
-| `--storage-mode` | `TRACEPOND_STORAGE_MODE` | `cache` |
-| `--bronze-mode` | `TRACEPOND_BRONZE_MODE` | profile default |
-| `--silver-mode` | `TRACEPOND_SILVER_MODE` | profile default |
-| `--gold-mode` | `TRACEPOND_GOLD_MODE` | profile default |
-| `--search` | `TRACEPOND_SEARCH` | profile default |
-| `--refresh-interval` | `TRACEPOND_REFRESH_INTERVAL` | `0` |
+| `--refresh-interval` | `TRACEPOND_REFRESH_INTERVAL` | `5m` |
 
 Durations: `0`, `30s`, `5m`, `1h`, `1d`.
 

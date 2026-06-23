@@ -11,58 +11,27 @@ test("parseDurationMs uses standard duration strings", () => {
   assert.throws(() => parseDurationMs("soon"), /Invalid refresh interval/);
 });
 
-test("storage profiles resolve layer defaults", () => {
-  assert.deepEqual(resolveLayerConfig({ storageMode: "cache" }), {
-    storageMode: "cache",
-    bronzeMode: "table",
+test("layer policy is fixed and minimal", () => {
+  assert.deepEqual(resolveLayerConfig(), {
+    storageMode: "default",
+    bronzeMode: "view",
     silverMode: "view",
-    goldMode: "view",
-    searchMode: "off",
-  });
-
-  assert.deepEqual(resolveLayerConfig({ storageMode: "search" }), {
-    storageMode: "search",
-    bronzeMode: "table",
-    silverMode: "view",
-    goldMode: "view",
+    goldMode: "table",
     searchMode: "table",
   });
-});
-
-test("explicit layer overrides win over storage profile defaults", () => {
-  assert.deepEqual(resolveLayerConfig({
-    storageMode: "cache",
-    searchMode: "table",
-  }), {
-    storageMode: "cache",
-    bronzeMode: "table",
-    silverMode: "view",
-    goldMode: "view",
-    searchMode: "table",
-  });
-});
-
-test("invalid layer config fails clearly", () => {
-  assert.throws(
-    () => resolveLayerConfig({ storageMode: "invalid" as never }),
-    /Invalid storage mode/,
-  );
 });
 
 test("resolveMemoryConfig reads env and normalizes paths", () => {
-  const previousStorageMode = process.env.TRACEPOND_STORAGE_MODE;
   const previousRefreshInterval = process.env.TRACEPOND_REFRESH_INTERVAL;
-  process.env.TRACEPOND_STORAGE_MODE = "search";
   process.env.TRACEPOND_REFRESH_INTERVAL = "2m";
 
   try {
     const config = resolveMemoryConfig({ cwd: "." });
-    assert.equal(config.storageMode, "search");
+    assert.equal(config.storageMode, "default");
     assert.equal(config.searchMode, "table");
     assert.equal(config.refreshIntervalMs, 120_000);
     assert.ok(config.cwd.startsWith("/"));
   } finally {
-    restoreEnv("TRACEPOND_STORAGE_MODE", previousStorageMode);
     restoreEnv("TRACEPOND_REFRESH_INTERVAL", previousRefreshInterval);
   }
 });

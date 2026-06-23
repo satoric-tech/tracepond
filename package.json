@@ -1,7 +1,7 @@
 {
   "name": "@satoric-tech/tracepond",
   "version": "0.1.0",
-  "description": "MCP memory server for read-only DuckDB SQL over coding-agent memories, traces, and instructions.",
+  "description": "CLI, SDK, and MCP server for read-only DuckDB SQL over coding-agent traces.",
   "type": "module",
   "main": "./dist/sdk.js",
   "types": "./dist/sdk.d.ts",

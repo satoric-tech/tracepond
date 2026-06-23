@@ -10,19 +10,13 @@ type CliOptions = {
   cursorHome?: string;
   opencodeDataDir?: string[];
   databasePath?: string;
-  workspaceRoot?: string[];
   cwd?: string;
-  storageMode?: MemoryConfig["storageMode"];
-  bronzeMode?: MemoryConfig["bronzeMode"];
-  silverMode?: MemoryConfig["silverMode"];
-  goldMode?: MemoryConfig["goldMode"];
-  search?: MemoryConfig["searchMode"];
   refreshInterval?: string;
 };
 
 const program = new Command()
   .name("tracepond")
-  .description("Query local coding-agent traces and memories with DuckDB SQL.")
+  .description("Query local coding-agent traces with DuckDB SQL.")
   .version("0.1.0")
   .showHelpAfterError()
   .option("--codex-home <path>", "Override Codex home, default ~/.codex")
@@ -30,14 +24,8 @@ const program = new Command()
   .option("--cursor-home <path>", "Override Cursor home, default ~/.cursor")
   .option("--opencode-data-dir <path>", "Add an OpenCode data dir; can be repeated, default ~/.local/share/opencode", collect, [])
   .option("--database-path <path>", "Override persistent DuckDB cache path, default ~/.tracepond/tracepond.duckdb")
-  .option("--workspace-root <path>", "Add a workspace root; can be repeated", collect, [])
   .option("--cwd <path>", "Override current working directory")
-  .option("--storage-mode <mode>", "Storage profile: live, cache, search, fast")
-  .option("--bronze-mode <mode>", "Bronze physical mode override: view, table")
-  .option("--silver-mode <mode>", "Silver physical mode override: view, table")
-  .option("--gold-mode <mode>", "Gold physical mode override: view, table")
-  .option("--search <mode>", "Search physical mode: off, table")
-  .option("--refresh-interval <duration>", "Minimum global table-refresh interval, e.g. 0, 30s, 5m, 1h");
+  .option("--refresh-interval <duration>", "Minimum gold/FTS refresh interval, e.g. 0, 30s, 5m, 1h; default 5m");
 
 program
   .command("mcp")
@@ -82,12 +70,6 @@ function configFromOptions(options: CliOptions): Partial<MemoryConfig> {
     cursorHome: options.cursorHome,
     opencodeDataDirs: options.opencodeDataDir?.length ? options.opencodeDataDir : undefined,
     databasePath: options.databasePath,
-    workspaceRoots: options.workspaceRoot?.length ? options.workspaceRoot : undefined,
-    storageMode: options.storageMode,
-    bronzeMode: options.bronzeMode,
-    silverMode: options.silverMode,
-    goldMode: options.goldMode,
-    searchMode: options.search,
     refreshIntervalMs: parseDurationMs(options.refreshInterval),
   };
 }

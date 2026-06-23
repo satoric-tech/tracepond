@@ -15,9 +15,9 @@ export async function runMemoryMcpServer(config: Partial<MemoryConfig> = {}): Pr
       {
         title: name,
         description:
-          "Run read-only DuckDB SQL over local coding-agent memories, traces, instructions, and prior work.",
+          "Run read-only DuckDB SQL over local coding-agent traces and prior work.",
         inputSchema: {
-          query: z.string().min(1).describe("Read-only DuckDB SQL to run against memory views."),
+          query: z.string().min(1).describe("Read-only DuckDB SQL to run against Tracepond views and tables."),
         },
       },
       async ({ query }) => {
@@ -34,7 +34,7 @@ export async function runMemoryMcpServer(config: Partial<MemoryConfig> = {}): Pr
       name,
       {
         title: name,
-        description: "Describe available DuckDB memory views, schemas, and example queries.",
+        description: "Describe available DuckDB Tracepond views, tables, schemas, and example queries.",
         inputSchema: {},
       },
       async () => {
