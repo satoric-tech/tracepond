@@ -118,26 +118,26 @@ tracepond --refresh-interval 5m describe
 
 Configuration stays limited to paths and refresh timing.
 
-- `--codex-home` / `TRACEPOND_CODEX_HOME`: `~/.codex`
-- `--claude-home` / `TRACEPOND_CLAUDE_HOME`: `~/.claude`
-- `--cursor-home` / `TRACEPOND_CURSOR_HOME`: `~/.cursor`
-- `--opencode-data-dir` / `TRACEPOND_OPENCODE_DATA_DIRS`: `~/.local/share/opencode`
-- `--database-path` / `TRACEPOND_DATABASE_PATH`: `~/.tracepond/tracepond.duckdb`
-- `--refresh-interval` / `TRACEPOND_REFRESH_INTERVAL`: `5m`
+| CLI flag | Env var | Default |
+|---|---|---|
+| `--codex-home` | `TRACEPOND_CODEX_HOME` | `~/.codex` |
+| `--claude-home` | `TRACEPOND_CLAUDE_HOME` | `~/.claude` |
+| `--cursor-home` | `TRACEPOND_CURSOR_HOME` | `~/.cursor` |
+| `--opencode-data-dir` | `TRACEPOND_OPENCODE_DATA_DIRS` | `~/.local/share/opencode` |
+| `--database-path` | `TRACEPOND_DATABASE_PATH` | `~/.tracepond/tracepond.duckdb` |
+| `--refresh-interval` | `TRACEPOND_REFRESH_INTERVAL` | `5m` |
+
+Refresh intervals use standard duration strings, such as `0`, `30s`, `5m`, `1h`, or `1d`.
 
 ## Development
 
-Use standard duration strings for refresh intervals.
-
-Examples: `0`, `30s`, `5m`, `1h`, `1d`.
-
-Develop locally with npm.
+Install dependencies and run the local checks.
 
 ```sh
 npm install
 npm run check
+npm run test
 npm run build
-npm run smoke
 ```
 
 ## License
