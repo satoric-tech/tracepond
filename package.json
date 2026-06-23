@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "description": "MCP memory server for read-only DuckDB SQL over coding-agent memories, traces, and instructions.",
   "type": "module",
+  "main": "./dist/sdk.js",
+  "types": "./dist/sdk.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk.d.ts",
+      "default": "./dist/sdk.js"
+    },
+    "./memory": {
+      "types": "./dist/memory/duckdb.d.ts",
+      "default": "./dist/memory/duckdb.js"
+    }
+  },
   "bin": {
     "tracepond": "./dist/index.js"
   },
@@ -10,18 +22,25 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/index.ts",
+    "lint": "eslint .",
+    "test": "tsx --test tests/*.test.ts",
     "smoke": "tsx src/index.ts query \"SELECT event_type, payload_type, count(*) AS n FROM codex_events GROUP BY 1, 2 ORDER BY n DESC LIMIT 10\""
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.4-r.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^15.0.0",
+    "ms": "^2.1.3",
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/ms": "^2.1.0",
     "@types/node": "^25.0.0",
+    "eslint": "^10.5.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.62.0"
   },
   "engines": {
     "node": ">=22"

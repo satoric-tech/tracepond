@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { runMemoryMcpServer } from "./mcp/server.js";
-import { formatQueryResult, MemoryDuckDb, type MemoryConfig } from "./memory/duckdb.js";
+import { parseDurationMs } from "./memory/duckdb.js";
+import { describe, formatQueryResult, query, refresh, type MemoryConfig } from "./sdk.js";
 
 type CliOptions = {
   codexHome?: string;
@@ -11,6 +12,12 @@ type CliOptions = {
   databasePath?: string;
   workspaceRoot?: string[];
   cwd?: string;
+  storageMode?: MemoryConfig["storageMode"];
+  bronzeMode?: MemoryConfig["bronzeMode"];
+  silverMode?: MemoryConfig["silverMode"];
+  goldMode?: MemoryConfig["goldMode"];
+  search?: MemoryConfig["searchMode"];
+  refreshInterval?: string;
 };
 
 const program = new Command()
@@ -24,7 +31,13 @@ const program = new Command()
   .option("--opencode-data-dir <path>", "Add an OpenCode data dir; can be repeated, default ~/.local/share/opencode", collect, [])
   .option("--database-path <path>", "Override persistent DuckDB cache path, default ~/.tracepond/tracepond.duckdb")
   .option("--workspace-root <path>", "Add a workspace root; can be repeated", collect, [])
-  .option("--cwd <path>", "Override current working directory");
+  .option("--cwd <path>", "Override current working directory")
+  .option("--storage-mode <mode>", "Storage profile: live, cache, search, fast")
+  .option("--bronze-mode <mode>", "Bronze physical mode override: view, table")
+  .option("--silver-mode <mode>", "Silver physical mode override: view, table")
+  .option("--gold-mode <mode>", "Gold physical mode override: view, table")
+  .option("--search <mode>", "Search physical mode: off, table")
+  .option("--refresh-interval <duration>", "Minimum global table-refresh interval, e.g. 0, 30s, 5m, 1h");
 
 program
   .command("mcp")
@@ -38,24 +51,22 @@ program
   .description("Run read-only DuckDB SQL locally")
   .argument("<sql...>", "Read-only SQL query")
   .action(async (sqlParts: string[]) => {
-    const db = await MemoryDuckDb.open(configFromOptions(program.opts<CliOptions>()));
-    try {
-      console.log(formatQueryResult(await db.query(sqlParts.join(" "))));
-    } finally {
-      await db.close();
-    }
+    const result = await query(sqlParts.join(" "), configFromOptions(program.opts<CliOptions>()));
+    console.log(formatQueryResult(result));
   });
 
 program
   .command("describe")
   .description("Describe available views and resolved config")
   .action(async () => {
-    const db = await MemoryDuckDb.open(configFromOptions(program.opts<CliOptions>()));
-    try {
-      console.log(await db.describe());
-    } finally {
-      await db.close();
-    }
+    console.log(await describe(configFromOptions(program.opts<CliOptions>())));
+  });
+
+program
+  .command("refresh")
+  .description("Force the global bronze-to-silver-to-gold refresh path")
+  .action(async () => {
+    await refresh(configFromOptions(program.opts<CliOptions>()));
   });
 
 function collect(value: string, previous: string[]): string[] {
@@ -72,6 +83,12 @@ function configFromOptions(options: CliOptions): Partial<MemoryConfig> {
     opencodeDataDirs: options.opencodeDataDir?.length ? options.opencodeDataDir : undefined,
     databasePath: options.databasePath,
     workspaceRoots: options.workspaceRoot?.length ? options.workspaceRoot : undefined,
+    storageMode: options.storageMode,
+    bronzeMode: options.bronzeMode,
+    silverMode: options.silverMode,
+    goldMode: options.goldMode,
+    searchMode: options.search,
+    refreshIntervalMs: parseDurationMs(options.refreshInterval),
   };
 }
 

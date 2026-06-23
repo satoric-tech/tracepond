@@ -4,12 +4,30 @@ import path from "node:path";
 import os from "node:os";
 import { performance } from "node:perf_hooks";
 import { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
+import ms from "ms";
+import { z } from "zod";
 
 export type QueryResult = {
   columns: string[];
   rows: unknown[][];
   rowCount: number;
   elapsedMs: number;
+};
+
+const storageModeSchema = z.enum(["live", "cache", "search", "fast"]);
+const layerModeSchema = z.enum(["view", "table"]);
+const searchModeSchema = z.enum(["off", "table"]);
+
+export type StorageMode = z.infer<typeof storageModeSchema>;
+export type LayerMode = z.infer<typeof layerModeSchema>;
+export type SearchMode = z.infer<typeof searchModeSchema>;
+
+export type LayerConfig = {
+  storageMode: StorageMode;
+  bronzeMode: LayerMode;
+  silverMode: LayerMode;
+  goldMode: LayerMode;
+  searchMode: SearchMode;
 };
 
 export type MemoryConfig = {
@@ -21,6 +39,12 @@ export type MemoryConfig = {
   databasePath: string;
   client: string;
   workspaceRoots: string[];
+  storageMode: StorageMode;
+  bronzeMode: LayerMode;
+  silverMode: LayerMode;
+  goldMode: LayerMode;
+  searchMode: SearchMode;
+  refreshIntervalMs: number;
 };
 
 type TraceSource = "codex" | "claude" | "cursor" | "opencode";
@@ -63,7 +87,7 @@ export class MemoryDuckDb {
       SELECT table_name, column_name, data_type AS column_type
       FROM duckdb_columns()
       WHERE schema_name = 'main'
-        AND table_name IN ('source_files', 'codex_raw', 'codex_events', 'claude_raw', 'claude_events', 'cursor_raw', 'cursor_events', 'opencode_raw', 'opencode_events', 'memory_documents')
+        AND table_name IN ('source_files', 'tracepond_metadata', 'codex_raw', 'codex_events', 'claude_raw', 'claude_events', 'cursor_raw', 'cursor_events', 'opencode_raw', 'opencode_events', 'memory_documents', 'messages', 'conversations', 'tool_calls', 'search_documents')
       ORDER BY table_name, column_index
     `);
 
@@ -74,13 +98,19 @@ export class MemoryDuckDb {
       `- client: ${this.config.client}`,
       `- cwd: ${this.config.cwd}`,
       `- database_path: ${this.config.databasePath}`,
+      `- storage_mode: ${this.config.storageMode}`,
+      `- bronze_mode: ${this.config.bronzeMode}`,
+      `- silver_mode: ${this.config.silverMode}`,
+      `- gold_mode: ${this.config.goldMode}`,
+      `- search: ${this.config.searchMode}`,
+      `- refresh_interval_ms: ${this.config.refreshIntervalMs}`,
       `- codex_home: ${this.config.codexHome}`,
       `- claude_home: ${this.config.claudeHome}`,
       `- cursor_home: ${this.config.cursorHome}`,
       `- opencode_data_dirs: ${this.config.opencodeDataDirs.join(", ") || "(none)"}`,
       `- workspace_roots: ${this.config.workspaceRoots.join(", ") || "(none)"}`,
       "",
-      "Core views:",
+      "Core tables/views:",
       "- codex_raw: raw Codex JSONL rows materialized from <codex_home>/sessions/**/*.jsonl",
       "- codex_events: extracted Codex event fields plus raw JSON",
       "- claude_raw: raw Claude Code JSONL rows materialized from <claude_home>/projects/**/*.jsonl and <claude_home>/history.jsonl",
@@ -89,10 +119,15 @@ export class MemoryDuckDb {
       "- cursor_events: extracted Cursor message/tool fields from decoded blob JSON",
       "- opencode_raw: raw OpenCode JSON rows materialized from <opencode_data_dir>/storage/session/**/*.json and <opencode_data_dir>/storage/message/**/*.json",
       "- opencode_events: extracted OpenCode event/session fields plus raw JSON",
+      "- messages: cross-source normalized message stream",
+      "- conversations: cross-source conversation/session rollups",
+      "- tool_calls: cross-source normalized tool calls and results",
+      "- search_documents: cross-source searchable text chunks",
       "- memory_documents: Markdown/text memory and instruction files",
       "- source_files: manifest of cached source files, mtimes, sizes, and ingest timestamps",
+      "- tracepond_metadata: refresh metadata and internal cache state",
       "",
-      "User queries run against a DuckDB database reopened with access_mode=READ_ONLY and enable_external_access=false.",
+      `User queries run against a DuckDB database reopened with access_mode=READ_ONLY and enable_external_access=${this.config.searchMode === "table" ? "true" : "false"}.`,
       "",
       "`line_number` is the JSONL row number within the scanned file.",
       "",
@@ -101,6 +136,8 @@ export class MemoryDuckDb {
       "",
       "Example queries:",
       "SELECT event_type, payload_type, count(*) FROM codex_events GROUP BY 1, 2 ORDER BY 3 DESC;",
+      "SELECT source, ts, role, substr(text, 1, 120) FROM messages WHERE text ILIKE '%deploy%' ORDER BY ts DESC LIMIT 10;",
+      "SELECT source, session_id, message_count, substr(first_user_text, 1, 120) FROM conversations ORDER BY ended_at DESC NULLS LAST LIMIT 10;",
       "SELECT ts, filename, line_number, text FROM codex_events WHERE text ILIKE '%corpus_mente%' ORDER BY ts LIMIT 20;",
       "SELECT tool_name, count(*) FROM codex_events WHERE payload_type = 'function_call' GROUP BY 1 ORDER BY 2 DESC;",
       "SELECT session_id, role, substr(text, 1, 120) FROM cursor_events WHERE text ILIKE '%deploy%' LIMIT 10;",
@@ -109,22 +146,32 @@ export class MemoryDuckDb {
   }
 
   private async initialize(): Promise<void> {
+    assertSupportedLayerConfig(this.config);
     await mkdir(path.dirname(this.config.databasePath), { recursive: true });
 
     this.instance = await DuckDBInstance.create(this.config.databasePath, writableDuckDbOptions());
     this.connection = await this.instance.connect();
     await this.bootstrapSchema();
-    await this.refreshTraceFiles();
+    const shouldRunGlobalTableRefresh = await this.shouldRunGlobalTableRefresh();
+    if (shouldRunGlobalTableRefresh) {
+      await this.refreshMaterializedTables();
+    }
     await this.bootstrapViews();
-    await this.bootstrapMemoryDocuments();
+    if (shouldRunGlobalTableRefresh) {
+      await this.refreshSearchTables();
+      await this.markGlobalTableRefresh();
+    }
 
     this.connection.closeSync();
     this.connection = null;
     this.instance.closeSync();
     this.instance = null;
 
-    this.instance = await DuckDBInstance.create(this.config.databasePath, readOnlyDuckDbOptions());
+    this.instance = await DuckDBInstance.create(this.config.databasePath, readOnlyDuckDbOptions(this.config));
     this.connection = await this.instance.connect();
+    if (this.config.searchMode === "table") {
+      await this.loadFtsExtension();
+    }
   }
 
   private async bootstrapSchema(): Promise<void> {
@@ -137,6 +184,13 @@ export class MemoryDuckDb {
         size_bytes BIGINT,
         mtime_ms BIGINT,
         ingested_at TIMESTAMP
+      )
+    `);
+
+    await connection.runAndReadAll(`
+      CREATE TABLE IF NOT EXISTS tracepond_metadata (
+        key VARCHAR PRIMARY KEY,
+        value VARCHAR
       )
     `);
 
@@ -248,6 +302,90 @@ export class MemoryDuckDb {
       }
       await this.upsertSourceFiles(changedFiles);
     }
+  }
+
+  private async refreshMaterializedTables(): Promise<void> {
+    await this.refreshBronzeTables();
+    await this.refreshMemoryDocumentsTable();
+    await this.refreshSilverTables();
+    await this.refreshGoldTables();
+  }
+
+  private async refreshBronzeTables(): Promise<void> {
+    await this.refreshTraceFiles();
+  }
+
+  private async refreshSilverTables(): Promise<void> {
+    if (this.config.silverMode === "table") {
+      throw new Error("silver table refresh is not implemented yet; use TRACEPOND_SILVER_MODE=view");
+    }
+  }
+
+  private async refreshGoldTables(): Promise<void> {
+    if (this.config.goldMode === "table") {
+      throw new Error("gold table refresh is not implemented yet; use TRACEPOND_GOLD_MODE=view");
+    }
+  }
+
+  private async refreshSearchTables(): Promise<void> {
+    if (this.config.searchMode === "table") {
+      await this.dropSearchDocumentsObject();
+      await this.requireConnection().runAndReadAll(`
+        CREATE OR REPLACE TABLE search_documents AS
+        ${this.searchDocumentsSelectSql()}
+      `);
+      await this.createSearchIndex();
+    }
+  }
+
+  private async shouldRunGlobalTableRefresh(): Promise<boolean> {
+    if (this.config.refreshIntervalMs <= 0) {
+      return true;
+    }
+    const reader = await this.requireConnection().runAndReadAll(`
+      SELECT value
+      FROM tracepond_metadata
+      WHERE key = 'last_global_refresh_at'
+    `);
+    const rows = reader.getRowsJson() as unknown[][];
+    const lastRefresh = rows[0]?.[0];
+    if (!lastRefresh) {
+      return true;
+    }
+    if (this.config.searchMode === "table" && !(await this.tableExists("search_documents"))) {
+      return true;
+    }
+    const lastRefreshMs = new Date(String(lastRefresh)).getTime();
+    return !Number.isFinite(lastRefreshMs) || Date.now() - lastRefreshMs >= this.config.refreshIntervalMs;
+  }
+
+  private async tableExists(tableName: string): Promise<boolean> {
+    const reader = await this.requireConnection().runAndReadAll(`
+      SELECT count(*) AS n
+      FROM duckdb_tables()
+      WHERE schema_name = 'main'
+        AND table_name = ${sqlString(tableName)}
+    `);
+    const rows = reader.getRowsJson() as unknown[][];
+    return BigInt(rows[0]?.[0] as bigint | number | string) > 0n;
+  }
+
+  private async viewExists(viewName: string): Promise<boolean> {
+    const reader = await this.requireConnection().runAndReadAll(`
+      SELECT count(*) AS n
+      FROM duckdb_views()
+      WHERE schema_name = 'main'
+        AND view_name = ${sqlString(viewName)}
+    `);
+    const rows = reader.getRowsJson() as unknown[][];
+    return BigInt(rows[0]?.[0] as bigint | number | string) > 0n;
+  }
+
+  private async markGlobalTableRefresh(): Promise<void> {
+    await this.requireConnection().runAndReadAll(`
+      INSERT OR REPLACE INTO tracepond_metadata
+      VALUES ('last_global_refresh_at', ${sqlString(new Date().toISOString())})
+    `);
   }
 
   private async bulkRefreshSource(
@@ -389,6 +527,14 @@ export class MemoryDuckDb {
       await this.requireConnection().runAndReadAll("LOAD sqlite;");
     } catch {
       await this.requireConnection().runAndReadAll("INSTALL sqlite; LOAD sqlite;");
+    }
+  }
+
+  private async loadFtsExtension(): Promise<void> {
+    try {
+      await this.requireConnection().runAndReadAll("LOAD fts;");
+    } catch {
+      await this.requireConnection().runAndReadAll("INSTALL fts; LOAD fts;");
     }
   }
 
@@ -538,9 +684,229 @@ export class MemoryDuckDb {
         raw
       FROM opencode_raw
     `);
+
+    await this.bootstrapGoldViews();
   }
 
-  private async bootstrapMemoryDocuments(): Promise<void> {
+  private async bootstrapGoldViews(): Promise<void> {
+    const connection = this.requireConnection();
+
+    await connection.runAndReadAll(`
+      CREATE OR REPLACE VIEW messages AS
+      SELECT
+        md5('codex:' || filename || ':' || line_number::VARCHAR) AS message_key,
+        source,
+        coalesce(turn_id, filename) AS session_id,
+        line_number AS source_row_number,
+        ts,
+        coalesce(role, CASE
+          WHEN tool_name IS NOT NULL OR call_id IS NOT NULL OR payload_type IN ('function_call', 'function_call_output') THEN 'tool'
+          WHEN payload_type = 'agent_message' THEN 'assistant'
+          WHEN payload_type = 'user_message' THEN 'user'
+          WHEN event_type = 'user_message' THEN 'user'
+          WHEN event_type = 'agent_message' THEN 'assistant'
+          ELSE 'event'
+        END) AS role,
+        text,
+        tool_name,
+        call_id AS tool_call_id,
+        NULL::VARCHAR AS model,
+        filename,
+        raw
+      FROM codex_events
+      WHERE text IS NOT NULL
+        OR role IS NOT NULL
+        OR tool_name IS NOT NULL
+        OR call_id IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        md5('claude:' || filename || ':' || line_number::VARCHAR) AS message_key,
+        source,
+        coalesce(session_id, filename) AS session_id,
+        line_number AS source_row_number,
+        ts,
+        coalesce(role, CASE
+          WHEN tool_name IS NOT NULL THEN 'tool'
+          ELSE 'event'
+        END) AS role,
+        text,
+        tool_name,
+        NULL::VARCHAR AS tool_call_id,
+        NULL::VARCHAR AS model,
+        filename,
+        raw
+      FROM claude_events
+      WHERE text IS NOT NULL
+        OR role IS NOT NULL
+        OR tool_name IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        md5('cursor:' || filename || ':' || row_number::VARCHAR) AS message_key,
+        source,
+        coalesce(session_id, filename) AS session_id,
+        row_number AS source_row_number,
+        ts,
+        coalesce(role, 'event') AS role,
+        text,
+        tool_name,
+        tool_call_id,
+        NULL::VARCHAR AS model,
+        filename,
+        raw
+      FROM cursor_events
+      WHERE text IS NOT NULL
+        OR role IS NOT NULL
+        OR tool_name IS NOT NULL
+        OR tool_call_id IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        md5('opencode:' || filename || ':' || line_number::VARCHAR) AS message_key,
+        source,
+        coalesce(session_id, filename) AS session_id,
+        line_number AS source_row_number,
+        ts,
+        coalesce(role, 'event') AS role,
+        text,
+        NULL::VARCHAR AS tool_name,
+        NULL::VARCHAR AS tool_call_id,
+        model,
+        filename,
+        raw
+      FROM opencode_events
+      WHERE kind = 'message'
+        AND (text IS NOT NULL OR role IS NOT NULL)
+    `);
+
+    await connection.runAndReadAll(`
+      CREATE OR REPLACE VIEW conversations AS
+      WITH ranked AS (
+        SELECT
+          *,
+          row_number() OVER (
+            PARTITION BY source, session_id
+            ORDER BY CASE WHEN role = 'user' AND text IS NOT NULL THEN 0 ELSE 1 END, ts NULLS LAST, source_row_number
+          ) AS first_user_rank,
+          row_number() OVER (
+            PARTITION BY source, session_id
+            ORDER BY CASE WHEN text IS NOT NULL THEN 0 ELSE 1 END, ts DESC NULLS LAST, source_row_number DESC
+          ) AS last_text_rank
+        FROM messages
+      )
+      SELECT
+        md5(source || ':' || session_id) AS conversation_key,
+        source,
+        session_id,
+        min(ts) AS started_at,
+        max(ts) AS ended_at,
+        count(*) AS message_count,
+        count(*) FILTER (WHERE tool_name IS NOT NULL OR tool_call_id IS NOT NULL OR role = 'tool') AS tool_call_count,
+        max(CASE WHEN role = 'user' AND first_user_rank = 1 THEN text END) AS first_user_text,
+        max(CASE WHEN last_text_rank = 1 THEN text END) AS last_text
+      FROM ranked
+      GROUP BY source, session_id
+    `);
+
+    await connection.runAndReadAll(`
+      CREATE OR REPLACE VIEW tool_calls AS
+      SELECT
+        message_key AS tool_call_key,
+        source,
+        session_id,
+        ts,
+        role,
+        tool_name,
+        tool_call_id,
+        CASE WHEN role <> 'tool' THEN text END AS input_text,
+        CASE WHEN role = 'tool' THEN text END AS output_text,
+        filename,
+        raw
+      FROM messages
+      WHERE tool_name IS NOT NULL
+        OR tool_call_id IS NOT NULL
+        OR role = 'tool'
+    `);
+
+    if (this.config.searchMode === "off") {
+      await this.dropSearchDocumentsObject();
+      await connection.runAndReadAll(`
+        CREATE OR REPLACE VIEW search_documents AS
+        ${this.searchDocumentsSelectSql()}
+      `);
+    }
+  }
+
+  private searchDocumentsSelectSql(): string {
+    return `
+      SELECT
+        message_key AS document_key,
+        source,
+        CASE WHEN tool_name IS NOT NULL OR tool_call_id IS NOT NULL OR role = 'tool'
+          THEN 'tool_call'
+          ELSE 'message'
+        END AS kind,
+        session_id,
+        ts,
+        coalesce(role, source) AS title,
+        text,
+        json_object(
+          'filename', filename,
+          'role', role,
+          'tool_name', tool_name,
+          'tool_call_id', tool_call_id
+        ) AS metadata
+      FROM messages
+      WHERE text IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        id AS document_key,
+        source,
+        kind,
+        NULL::VARCHAR AS session_id,
+        mtime AS ts,
+        title,
+        text,
+        json_object(
+          'path', path,
+          'size_bytes', size_bytes
+        ) AS metadata
+      FROM memory_documents
+      WHERE text IS NOT NULL
+    `;
+  }
+
+  private async createSearchIndex(): Promise<void> {
+    await this.loadFtsExtension();
+    await this.requireConnection().runAndReadAll(`
+      PRAGMA create_fts_index(
+        'search_documents',
+        'document_key',
+        'title',
+        'text',
+        overwrite = 1
+      )
+    `);
+  }
+
+  private async dropSearchDocumentsObject(): Promise<void> {
+    const connection = this.requireConnection();
+    if (await this.tableExists("search_documents")) {
+      await connection.runAndReadAll("DROP TABLE search_documents");
+      return;
+    }
+    if (await this.viewExists("search_documents")) {
+      await connection.runAndReadAll("DROP VIEW search_documents");
+    }
+  }
+
+  private async refreshMemoryDocumentsTable(): Promise<void> {
     const connection = this.requireConnection();
     await connection.runAndReadAll(`
       CREATE OR REPLACE TABLE memory_documents (
@@ -596,6 +962,7 @@ export function formatQueryResult(result: QueryResult): string {
 }
 
 export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryConfig {
+  const layers = resolveLayerConfig(config);
   const cwd =
     config.cwd ??
     process.env.TRACEPOND_CWD ??
@@ -629,6 +996,10 @@ export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryC
     splitPathList(process.env.TRACEPOND_WORKSPACE_ROOTS) ??
     splitPathList(process.env.WORKSPACE_ROOTS) ??
     [cwd];
+  const refreshIntervalMs =
+    config.refreshIntervalMs ??
+    parseDurationMs(process.env.TRACEPOND_REFRESH_INTERVAL) ??
+    0;
 
   return {
     cwd: path.resolve(cwd),
@@ -639,6 +1010,45 @@ export function resolveMemoryConfig(config: Partial<MemoryConfig> = {}): MemoryC
     databasePath: path.resolve(databasePath),
     client: config.client ?? process.env.TRACEPOND_CLIENT ?? "unknown",
     workspaceRoots: workspaceRoots.map((root) => path.resolve(root)),
+    ...layers,
+    refreshIntervalMs,
+  };
+}
+
+export function resolveLayerConfig(config: Partial<MemoryConfig> = {}): LayerConfig {
+  const storageMode = parseConfigValue(
+    storageModeSchema,
+    config.storageMode ?? process.env.TRACEPOND_STORAGE_MODE,
+    "cache",
+    "storage mode",
+  );
+  const defaults = layerDefaultsForStorageMode(storageMode);
+  return {
+    storageMode,
+    bronzeMode: parseConfigValue(
+      layerModeSchema,
+      config.bronzeMode ?? process.env.TRACEPOND_BRONZE_MODE,
+      defaults.bronzeMode,
+      "bronze mode",
+    ),
+    silverMode: parseConfigValue(
+      layerModeSchema,
+      config.silverMode ?? process.env.TRACEPOND_SILVER_MODE,
+      defaults.silverMode,
+      "silver mode",
+    ),
+    goldMode: parseConfigValue(
+      layerModeSchema,
+      config.goldMode ?? process.env.TRACEPOND_GOLD_MODE,
+      defaults.goldMode,
+      "gold mode",
+    ),
+    searchMode: parseConfigValue(
+      searchModeSchema,
+      config.searchMode ?? process.env.TRACEPOND_SEARCH,
+      defaults.searchMode,
+      "search mode",
+    ),
   };
 }
 
@@ -830,13 +1240,93 @@ function writableDuckDbOptions(): Record<string, string> {
   };
 }
 
-function readOnlyDuckDbOptions(): Record<string, string> {
+function readOnlyDuckDbOptions(config: MemoryConfig): Record<string, string> {
   return {
     access_mode: "READ_ONLY",
-    enable_external_access: "false",
+    enable_external_access: config.searchMode === "table" ? "true" : "false",
     autoinstall_known_extensions: "false",
     autoload_known_extensions: "false",
   };
+}
+
+function assertSupportedLayerConfig(config: MemoryConfig): void {
+  if (config.bronzeMode !== "table") {
+    throw new Error("bronze view mode is planned but not implemented yet; use TRACEPOND_BRONZE_MODE=table");
+  }
+  if (config.silverMode !== "view") {
+    throw new Error("silver table mode is planned but not implemented yet; use TRACEPOND_SILVER_MODE=view");
+  }
+  if (config.goldMode !== "view") {
+    throw new Error("gold table mode is planned but not implemented yet; use TRACEPOND_GOLD_MODE=view");
+  }
+}
+
+function layerDefaultsForStorageMode(storageMode: StorageMode): LayerConfig {
+  if (storageMode === "live") {
+    return {
+      storageMode,
+      bronzeMode: "view",
+      silverMode: "view",
+      goldMode: "view",
+      searchMode: "off",
+    };
+  }
+  if (storageMode === "search") {
+    return {
+      storageMode,
+      bronzeMode: "table",
+      silverMode: "view",
+      goldMode: "view",
+      searchMode: "table",
+    };
+  }
+  if (storageMode === "fast") {
+    return {
+      storageMode,
+      bronzeMode: "table",
+      silverMode: "table",
+      goldMode: "table",
+      searchMode: "table",
+    };
+  }
+  return {
+    storageMode,
+    bronzeMode: "table",
+    silverMode: "view",
+    goldMode: "view",
+    searchMode: "off",
+  };
+}
+
+function parseConfigValue<T extends z.ZodType>(
+  schema: T,
+  value: unknown,
+  fallback: z.output<T>,
+  label: string,
+): z.output<T> {
+  if (!value) {
+    return fallback;
+  }
+  const result = schema.safeParse(value);
+  if (result.success) {
+    return result.data;
+  }
+  throw new Error(`Invalid ${label}: ${value}. ${z.prettifyError(result.error)}`);
+}
+
+export function parseDurationMs(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  const parsed = ms(trimmed as ms.StringValue);
+  if (typeof parsed === "number" && Number.isFinite(parsed)) {
+    return parsed;
+  }
+  throw new Error(`Invalid refresh interval: ${value}. Use values like 0, 30s, 5m, 1h, or 1d.`);
 }
 
 function assertSafeReadOnlySql(sql: string): void {

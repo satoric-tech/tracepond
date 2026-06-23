@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { formatQueryResult, MemoryDuckDb, type MemoryConfig } from "../memory/duckdb.js";
+import { describe, formatQueryResult, query as runQuery, type MemoryConfig } from "../sdk.js";
 
 export async function runMemoryMcpServer(config: Partial<MemoryConfig> = {}): Promise<void> {
   const server = new McpServer({
@@ -21,15 +21,10 @@ export async function runMemoryMcpServer(config: Partial<MemoryConfig> = {}): Pr
         },
       },
       async ({ query }) => {
-        const db = await MemoryDuckDb.open(config);
-        try {
-          const result = await db.query(query);
-          return {
-            content: [{ type: "text", text: formatQueryResult(result) }],
-          };
-        } finally {
-          await db.close();
-        }
+        const result = await runQuery(query, config);
+        return {
+          content: [{ type: "text", text: formatQueryResult(result) }],
+        };
       },
     );
   };
@@ -43,14 +38,9 @@ export async function runMemoryMcpServer(config: Partial<MemoryConfig> = {}): Pr
         inputSchema: {},
       },
       async () => {
-        const db = await MemoryDuckDb.open(config);
-        try {
-          return {
-            content: [{ type: "text", text: await db.describe() }],
-          };
-        } finally {
-          await db.close();
-        }
+        return {
+          content: [{ type: "text", text: await describe(config) }],
+        };
       },
     );
   };
