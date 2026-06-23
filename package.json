@@ -1,0 +1,29 @@
+{
+  "name": "@satoric-tech/tracepond",
+  "version": "0.1.0",
+  "description": "MCP memory server for read-only DuckDB SQL over coding-agent memories, traces, and instructions.",
+  "type": "module",
+  "bin": {
+    "tracepond": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/index.ts",
+    "smoke": "tsx src/index.ts query \"SELECT event_type, payload_type, count(*) AS n FROM codex_events GROUP BY 1, 2 ORDER BY n DESC LIMIT 10\""
+  },
+  "dependencies": {
+    "@duckdb/node-api": "^1.5.4-r.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "commander": "^15.0.0",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
