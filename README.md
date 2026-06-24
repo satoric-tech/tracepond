@@ -98,11 +98,37 @@ Tracepond reads these local trace sources.
 - Cursor: `~/.cursor/chats/*/*/store.db`
 - OpenCode: `~/.local/share/opencode/storage/session/**/*.json`, `~/.local/share/opencode/storage/message/**/*.json`
 
-Gold tables are the stable query surface.
+### Bronze
 
-- `messages`
-- `conversations`
-- `tool_calls`
+Bronze views expose raw source-shaped rows.
+
+| View | Columns |
+|---|---|
+| `codex_raw` | `source`, `filename`, `line_number`, `raw` |
+| `claude_raw` | `source`, `filename`, `line_number`, `raw` |
+| `cursor_raw` | `source`, `filename`, `store_table`, `row_number`, `key`, `value_text`, `value_blob` |
+| `opencode_raw` | `source`, `filename`, `kind`, `session_id`, `line_number`, `raw` |
+
+### Silver
+
+Silver views normalize each source into event rows.
+
+| View | Columns |
+|---|---|
+| `codex_events` | `source`, `filename`, `line_number`, `ts`, `event_type`, `payload_type`, `turn_id`, `role`, `tool_name`, `call_id`, `text`, `raw` |
+| `claude_events` | `source`, `filename`, `line_number`, `ts`, `event_type`, `subtype`, `session_id`, `role`, `content_type`, `tool_name`, `text`, `raw` |
+| `cursor_events` | `source`, `filename`, `row_number`, `workspace_id`, `session_id`, `blob_id`, `ts`, `role`, `message_id`, `content_type`, `tool_name`, `tool_call_id`, `text`, `raw` |
+| `opencode_events` | `source`, `filename`, `kind`, `session_id`, `line_number`, `ts`, `role`, `provider`, `model`, `text`, `raw` |
+
+### Gold
+
+Gold tables are the stable cross-source query surface.
+
+| Table | Columns |
+|---|---|
+| `messages` | `message_key`, `source`, `session_id`, `source_row_number`, `ts`, `role`, `text`, `tool_name`, `tool_call_id`, `model`, `filename`, `raw` |
+| `conversations` | `conversation_key`, `source`, `session_id`, `started_at`, `ended_at`, `message_count`, `tool_call_count`, `first_user_text`, `last_text` |
+| `tool_calls` | `tool_call_key`, `source`, `session_id`, `ts`, `role`, `tool_name`, `tool_call_id`, `input_text`, `output_text`, `filename`, `raw` |
 
 FTS indexes are created directly on gold tables.
 
@@ -115,6 +141,8 @@ Gold tables refresh every 5 minutes by default.
 ```sh
 tracepond set refresh.interval 5m
 ```
+
+## Config
 
 Configuration is stored in the Tracepond home.
 
