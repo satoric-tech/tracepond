@@ -1,4 +1,5 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { performance } from "node:perf_hooks";
@@ -13,6 +14,24 @@ export type QueryResult = {
 };
 
 const defaultRefreshIntervalMs = 5 * 60 * 1000;
+const configFileName = "config.json";
+
+export type TracepondConfigKey =
+  | "tracepond.home"
+  | "codex.home"
+  | "claude.home"
+  | "cursor.home"
+  | "opencode.home"
+  | "refresh.interval";
+
+export type TracepondConfigFile = {
+  tracepond?: { home?: string };
+  codex?: { home?: string };
+  claude?: { home?: string };
+  cursor?: { home?: string };
+  opencode?: { home?: string };
+  refresh?: { interval?: string };
+};
 
 export type MemoryConfig = {
   cwd: string;
@@ -785,6 +804,7 @@ export function formatQueryResult(result: QueryResult): string {
 }
 
 export function resolveMemoryConfig(config: MemoryOptions = {}): MemoryConfig {
+  const fileConfig = readTracepondConfig();
   const cwd =
     config.cwd ??
     process.env.TRACEPOND_CWD ??
@@ -793,42 +813,88 @@ export function resolveMemoryConfig(config: MemoryOptions = {}): MemoryConfig {
     config.codexHome ??
     process.env.TRACEPOND_CODEX_HOME ??
     process.env.CODEX_HOME ??
+    fileConfig.codex?.home ??
     path.join(home(), ".codex");
   const claudeHome =
     config.claudeHome ??
     process.env.TRACEPOND_CLAUDE_HOME ??
     process.env.CLAUDE_HOME ??
+    fileConfig.claude?.home ??
     path.join(home(), ".claude");
   const cursorHome =
     config.cursorHome ??
     process.env.TRACEPOND_CURSOR_HOME ??
     process.env.CURSOR_HOME ??
+    fileConfig.cursor?.home ??
     path.join(home(), ".cursor");
   const opencodeHome =
     config.opencodeHome ??
     process.env.TRACEPOND_OPENCODE_HOME ??
     process.env.OPENCODE_HOME ??
+    fileConfig.opencode?.home ??
     path.join(home(), ".local", "share", "opencode");
   const tracepondHome =
     config.tracepondHome ??
     process.env.TRACEPOND_HOME ??
+    fileConfig.tracepond?.home ??
     path.join(home(), ".tracepond");
   const refreshIntervalMs =
     config.refreshIntervalMs ??
     parseDurationMs(process.env.TRACEPOND_REFRESH_INTERVAL) ??
+    parseDurationMs(fileConfig.refresh?.interval) ??
     defaultRefreshIntervalMs;
 
   return {
     cwd: path.resolve(cwd),
-    codexHome: path.resolve(codexHome),
-    claudeHome: path.resolve(claudeHome),
-    cursorHome: path.resolve(cursorHome),
-    opencodeHome: path.resolve(opencodeHome),
-    tracepondHome: path.resolve(tracepondHome),
-    databasePath: path.join(path.resolve(tracepondHome), "tracepond.duckdb"),
+    codexHome: resolveUserPath(codexHome),
+    claudeHome: resolveUserPath(claudeHome),
+    cursorHome: resolveUserPath(cursorHome),
+    opencodeHome: resolveUserPath(opencodeHome),
+    tracepondHome: resolveUserPath(tracepondHome),
+    databasePath: path.join(resolveUserPath(tracepondHome), "tracepond.duckdb"),
     client: config.client ?? process.env.TRACEPOND_CLIENT ?? "unknown",
     refreshIntervalMs,
   };
+}
+
+export function getTracepondConfigPath(): string {
+  return path.join(resolveConfigHome(), configFileName);
+}
+
+export function readTracepondConfig(): TracepondConfigFile {
+  try {
+    return JSON.parse(readFileSync(getTracepondConfigPath(), "utf8")) as TracepondConfigFile;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return {};
+    }
+    throw error;
+  }
+}
+
+export function getTracepondConfigValue(key?: TracepondConfigKey): TracepondConfigFile | string | undefined {
+  const config = readTracepondConfig();
+  if (!key) {
+    return config;
+  }
+  return valueForConfigKey(config, key);
+}
+
+export function setTracepondConfigValue(key: TracepondConfigKey, value: string): TracepondConfigFile {
+  if (key === "refresh.interval") {
+    parseDurationMs(value);
+  }
+  const config = readTracepondConfig();
+  setValueForConfigKey(config, key, value);
+  writeTracepondConfig(config);
+  return config;
+}
+
+export function unsetTracepondConfigValue(key: TracepondConfigKey): TracepondConfigFile {
+  const config = readTracepondConfig();
+  unsetValueForConfigKey(config, key);
+  writeTracepondConfig(config);
+  return config;
 }
 
 async function discoverTraceFiles(config: MemoryConfig): Promise<Array<{
@@ -993,6 +1059,89 @@ function emptySelect(columns: Record<string, string>): string {
   return `SELECT ${Object.entries(columns)
     .map(([name, expression]) => `${expression} AS ${name}`)
     .join(", ")} WHERE false`;
+}
+
+function valueForConfigKey(config: TracepondConfigFile, key: TracepondConfigKey): string | undefined {
+  if (key === "tracepond.home") {
+    return config.tracepond?.home;
+  }
+  if (key === "codex.home") {
+    return config.codex?.home;
+  }
+  if (key === "claude.home") {
+    return config.claude?.home;
+  }
+  if (key === "cursor.home") {
+    return config.cursor?.home;
+  }
+  if (key === "opencode.home") {
+    return config.opencode?.home;
+  }
+  return config.refresh?.interval;
+}
+
+function setValueForConfigKey(config: TracepondConfigFile, key: TracepondConfigKey, value: string): void {
+  if (key === "tracepond.home") {
+    config.tracepond = { ...config.tracepond, home: value };
+  } else if (key === "codex.home") {
+    config.codex = { ...config.codex, home: value };
+  } else if (key === "claude.home") {
+    config.claude = { ...config.claude, home: value };
+  } else if (key === "cursor.home") {
+    config.cursor = { ...config.cursor, home: value };
+  } else if (key === "opencode.home") {
+    config.opencode = { ...config.opencode, home: value };
+  } else {
+    config.refresh = { ...config.refresh, interval: value };
+  }
+}
+
+function unsetValueForConfigKey(config: TracepondConfigFile, key: TracepondConfigKey): void {
+  if (key === "tracepond.home" && config.tracepond) {
+    delete config.tracepond.home;
+    deleteEmptyObject(config, "tracepond");
+  } else if (key === "codex.home" && config.codex) {
+    delete config.codex.home;
+    deleteEmptyObject(config, "codex");
+  } else if (key === "claude.home" && config.claude) {
+    delete config.claude.home;
+    deleteEmptyObject(config, "claude");
+  } else if (key === "cursor.home" && config.cursor) {
+    delete config.cursor.home;
+    deleteEmptyObject(config, "cursor");
+  } else if (key === "opencode.home" && config.opencode) {
+    delete config.opencode.home;
+    deleteEmptyObject(config, "opencode");
+  } else if (key === "refresh.interval" && config.refresh) {
+    delete config.refresh.interval;
+    deleteEmptyObject(config, "refresh");
+  }
+}
+
+function deleteEmptyObject(config: TracepondConfigFile, key: keyof TracepondConfigFile): void {
+  if (config[key] && Object.keys(config[key]).length === 0) {
+    delete config[key];
+  }
+}
+
+function writeTracepondConfig(config: TracepondConfigFile): void {
+  const file = getTracepondConfigPath();
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+function resolveConfigHome(): string {
+  return resolveUserPath(process.env.TRACEPOND_HOME ?? path.join(home(), ".tracepond"));
+}
+
+function resolveUserPath(value: string): string {
+  if (value === "~") {
+    return home();
+  }
+  if (value.startsWith("~/")) {
+    return path.join(home(), value.slice(2));
+  }
+  return path.resolve(value);
 }
 
 function home(): string {

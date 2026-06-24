@@ -68,7 +68,7 @@ const result = await query(`
 await refresh();
 ```
 
-Pass source paths, database path, or refresh timing as options.
+Pass source homes, Tracepond home, or refresh timing as SDK options.
 
 ```ts
 await query("SELECT count(*) FROM messages", {
@@ -113,19 +113,29 @@ FTS indexes are created directly on gold tables.
 Gold tables refresh every 5 minutes by default.
 
 ```sh
-tracepond --refresh-interval 5m describe
+tracepond set refresh.interval 5m
 ```
 
-Configuration stays limited to paths and refresh timing.
+Configuration is stored in the Tracepond home.
 
-| CLI flag | Env var | Default |
+```sh
+tracepond get
+tracepond get codex.home
+tracepond set codex.home ~/.codex
+tracepond unset codex.home
+tracepond config-path
+```
+
+Environment variables override saved config for temporary changes.
+
+| Config key | Env var | Default |
 |---|---|---|
-| `--codex-home` | `TRACEPOND_CODEX_HOME` | `~/.codex` |
-| `--claude-home` | `TRACEPOND_CLAUDE_HOME` | `~/.claude` |
-| `--cursor-home` | `TRACEPOND_CURSOR_HOME` | `~/.cursor` |
-| `--opencode-home` | `TRACEPOND_OPENCODE_HOME` | `~/.local/share/opencode` |
-| `--tracepond-home` | `TRACEPOND_HOME` | `~/.tracepond` |
-| `--refresh-interval` | `TRACEPOND_REFRESH_INTERVAL` | `5m` |
+| `tracepond.home` | `TRACEPOND_HOME` | `~/.tracepond` |
+| `codex.home` | `TRACEPOND_CODEX_HOME` | `~/.codex` |
+| `claude.home` | `TRACEPOND_CLAUDE_HOME` | `~/.claude` |
+| `cursor.home` | `TRACEPOND_CURSOR_HOME` | `~/.cursor` |
+| `opencode.home` | `TRACEPOND_OPENCODE_HOME` | `~/.local/share/opencode` |
+| `refresh.interval` | `TRACEPOND_REFRESH_INTERVAL` | `5m` |
 
 Refresh intervals use standard duration strings, such as `0`, `30s`, `5m`, `1h`, or `1d`.
 
